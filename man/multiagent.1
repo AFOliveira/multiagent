@@ -1,0 +1,141 @@
+.TH MULTIAGENT 1 "May 2026" "multiagent" "User Commands"
+.SH NAME
+multiagent \- run Git-backed teams of Pi agents
+.SH SYNOPSIS
+.B multiagent
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+MULTIAGENT defines and runs a local agent system inside a Git repository.
+Repository configuration lives under
+.BR .multiagent ,
+and local runtime state lives under
+.BR ~/.multiagent/state/<instance-id> .
+There is no system-wide daemon.
+.PP
+Agents are configured in
+.B .multiagent/team.toml
+using singular
+.B [[agent]]
+tables. Pi is always the runtime. The
+.B mode
+field selects queued worker agents or persistent interactive agents.
+.SH TEAM CONFIGURATION
+Example:
+.PP
+.nf
+[[agent]]
+name = "planner-1"
+role = "planner"
+mode = "worker"
+
+[[agent]]
+name = "operator"
+role = "planner"
+mode = "interactive"
+options = { heartbeat = 15 }
+.fi
+.PP
+If
+.B options.heartbeat
+is absent, heartbeat is disabled for that agent. Heartbeat is only valid for
+interactive agents.
+.SH COMMANDS
+.TP
+.B local init
+Initialize repository MULTIAGENT files and ignored local state.
+.TP
+.B local update [--roles]
+Refresh instance state shape. With
+.BR --roles ,
+refresh packaged role templates too.
+.TP
+.B local start [--restart]
+Start the supervisor and every configured agent.
+.TP
+.B local stop
+Stop the supervisor and managed agents.
+.TP
+.B local restart
+Stop and start the supervisor, rereading the team file.
+.TP
+.B local status
+Show repository runtime status.
+.TP
+.B local prompt [--quiet] agent message...
+Send live input to a running interactive agent. Without
+.BR --quiet ,
+print the agent transcript for the current turn.
+.TP
+.B local log [-f] agent
+Print an agent transcript, optionally following it.
+.TP
+.B local team list
+List configured agents.
+.TP
+.B local team show [agent]
+Show the effective team file or one configured agent.
+.TP
+.B local team add agent --role role [--mode worker|interactive] [--model model] [--heartbeat minutes]
+Add an agent to the local team file.
+.TP
+.B local team set agent [--role role] [--mode worker|interactive] [--model model] [--heartbeat minutes] [--no-heartbeat]
+Update one configured agent.
+.TP
+.B local team remove agent
+Remove one configured agent.
+.TP
+.B local team edit
+Open the local team file in
+.BR EDITOR ,
+or print its path if no editor is set.
+.TP
+.B local role list|show|add|edit|diff|reset
+Inspect or manage role files.
+.TP
+.B local rules show
+Print the installed generic agent protocol.
+.TP
+.B agent task create|list|show|comment|state|result
+Operate on local task state.
+.TP
+.B agent job create|list|claim|start|done|fail|release|reset|kill|orphans|reset-orphans|reap|wait|mine|watch
+Operate on local job state and recovery workflows.
+.TP
+.B agent new|input|heartbeat|worker|interactive
+Run internal agent protocol utilities.
+.TP
+.B docker start|stop|destroy|logs|status|build-image
+Run and control containerized multiagent systems.
+.TP
+.B dashboard
+Serve the dashboard.
+.SH INTERACTIVE AGENTS
+A running interactive agent exposes a Unix socket and metadata file:
+.PP
+.nf
+~/.multiagent/state/<instance-id>/agents/<agent>/rpc.sock
+~/.multiagent/state/<instance-id>/agents/<agent>/rpc.json
+.fi
+.PP
+.B prompt,
+.BR agent-input ,
+heartbeat helpers, and the dashboard use that socket.
+.SH DASHBOARD
+.B multiagent dashboard
+serves the dashboard and reads running repositories from links under
+.BR ~/.multiagent/instances/ .
+The dashboard does not start hidden agents.
+.SH FILES
+.TP
+.B .multiagent/team.toml
+Repo-local team configuration.
+.TP
+.B .multiagent/roles/*.md
+Optional repo-local role overrides.
+.TP
+.B ~/.multiagent/state/<instance-id>/
+Runtime state.
+.TP
+.SH SEE ALSO
+.BR git (1)
