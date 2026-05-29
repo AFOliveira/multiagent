@@ -5,3 +5,4 @@ dist/
 *.egg-info/
 .pytest_cache/
 .coverage
+multiagent-system.toml

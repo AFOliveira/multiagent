@@ -573,6 +573,47 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(capture_calls[0][0:2], ["docker", "run"])
         self.assertIn(runner.Mount(extra, extra, "rw").docker_value(), capture_calls[0])
 
+    def test_start_replaces_stopped_container_when_device_config_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            device = base / "device"
+            device.touch()
+            config = self.make_config(base)
+            config = replace(config, devices=(device,))
+            args = argparse.Namespace(image=config.image, build=False, dry_run=False)
+            capture_calls: list[list[str]] = []
+
+            def fake_capture(command: list[str]) -> tuple[int, str]:
+                capture_calls.append(command)
+                return 0, "new-container-id"
+
+            with mock.patch.object(runner, "start_config_from_args", return_value=config), \
+                mock.patch.object(runner, "docker_container_exists", return_value=True), \
+                mock.patch.object(runner, "docker_container_running", return_value=False), \
+                mock.patch.object(
+                    runner,
+                    "docker_container_label",
+                    side_effect=self.container_label_side_effect(config, run_config_fingerprint="old-run-config"),
+                ), \
+                mock.patch.object(runner, "docker_image_exists", return_value=True), \
+                mock.patch.object(runner, "docker_image_label", return_value=config.source_fingerprint), \
+                mock.patch.object(runner, "run_command"), \
+                mock.patch.object(runner, "run_command_capture", side_effect=fake_capture), \
+                mock.patch.object(runner, "docker_stop_and_remove", return_value=0) as stop_remove, \
+                mock.patch.object(runner, "stop_host_auth_proxy_run_dir"), \
+                mock.patch.object(runner, "remove_registry_instance_for_repo"), \
+                mock.patch.object(runner, "write_host_registry_instance"), \
+                mock.patch.object(runner, "make_proxy_token", return_value="header.payload.signature"), \
+                mock.patch.object(runner, "prepare_projected_pi_home"), \
+                mock.patch.object(runner, "start_host_auth_proxy"):
+                rc = runner.cmd_start(args)
+
+        self.assertEqual(rc, 0)
+        stop_remove.assert_called_once_with(config.name)
+        self.assertEqual(capture_calls[0][0:2], ["docker", "run"])
+        self.assertIn("--device", capture_calls[0])
+        self.assertIn(str(device), capture_calls[0])
+
     def test_start_replaces_stale_stopped_container(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp).resolve()

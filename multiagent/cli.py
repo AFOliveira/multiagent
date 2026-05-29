@@ -1794,6 +1794,12 @@ def cmd_docker(args: argparse.Namespace) -> int:
     return runner.main(args.docker_args)
 
 
+def cmd_system(args: argparse.Namespace) -> int:
+    from . import system
+
+    return system.main(args.system_args)
+
+
 def add_role_parser(subparsers: argparse._SubParsersAction) -> None:
     role = subparsers.add_parser("role", help="manage roles")
     role_sub = role.add_subparsers(dest="role_command", required=True)
@@ -2019,6 +2025,9 @@ def build_parser(include_internal: bool = False) -> argparse.ArgumentParser:
     docker = subparsers.add_parser("docker", help="containerized MULTIAGENT control", add_help=False)
     docker.add_argument("docker_args", nargs=argparse.REMAINDER)
     docker.set_defaults(func=cmd_docker)
+    system = subparsers.add_parser("system", help="multi-repository system control", add_help=False)
+    system.add_argument("system_args", nargs=argparse.REMAINDER)
+    system.set_defaults(func=cmd_system)
     dashboard_parser = subparsers.add_parser("dashboard", help="serve the multiagent dashboard", add_help=False)
     dashboard_parser.add_argument("dashboard_args", nargs=argparse.REMAINDER)
     dashboard_parser.set_defaults(func=cmd_dashboard)
@@ -2042,6 +2051,10 @@ def main(argv: list[str] | None = None) -> int:
             from . import dashboard
 
             return dashboard.main(argv[1:])
+        if argv and argv[0] == "system":
+            from . import system
+
+            return system.main(argv[1:])
         if argv and argv[0] == "agent":
             return agent_runtime_main(argv[1:])
         parser = build_parser(include_internal=bool(argv and argv[0] == "_supervisor"))

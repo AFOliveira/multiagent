@@ -149,6 +149,27 @@ multiagent docker stop "$PWD"
 multiagent docker destroy "$PWD"
 ```
 
+## Systems
+
+A system groups multiple repositories under one MULTIAGENT root and starts a
+single dashboard with them:
+
+```sh
+multiagent system init --host 127.0.0.1 --port 4137
+multiagent system add-mount ~/work/shared --mode rw
+multiagent system add-dev /dev/ttyUSB0
+multiagent system add /path/to/repo-a --name repo-a
+multiagent system add /path/to/repo-b --name repo-b
+multiagent system start
+multiagent system status
+multiagent system stop
+```
+
+By default the system config is `multiagent-system.toml` in the current
+directory and the system root is `~/.multiagent`. `system start` starts every
+configured project and the dashboard; `system stop` stops both. Dashboard
+runtime metadata is recorded under `<root>/runs/system/`.
+
 ## Repository Layout
 
 The stationary side can be committed:
