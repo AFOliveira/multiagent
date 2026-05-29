@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multiagent"
+version = "0.2.0"
+description = "Git-native coding agent workflow extension"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+multiagent = "multiagent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["multiagent*"]
+
+[tool.setuptools.package-data]
+multiagent = [
+  ".dockerignore",
+  "templates/AGENTS.md",
+  "templates/roles/*.md",
+  "templates/team.toml",
+  "runtime/bin/*",
+  "runtime/tools/*",
+  "runtime/tools/multiagent-public/*",
+  "docker_context/*",
+]

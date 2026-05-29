@@ -19,11 +19,11 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-AGENT_TOOL = REPO_ROOT / "git_multiagent" / "runtime" / "tools" / "agent"
-INTERACTIVE_AGENT_TOOL = REPO_ROOT / "git_multiagent" / "runtime" / "tools" / "agent-pi-interactive"
-HEARTBEAT_TOOL = REPO_ROOT / "git_multiagent" / "runtime" / "tools" / "heartbeat"
-AGENT_INPUT_TOOL = REPO_ROOT / "git_multiagent" / "runtime" / "tools" / "agent-input"
-GIT_MULTIAGENT_UI_TOOL = REPO_ROOT / "git_multiagent" / "runtime" / "tools" / "git-multiagent-ui"
+AGENT_TOOL = REPO_ROOT / "multiagent" / "runtime" / "tools" / "agent"
+INTERACTIVE_AGENT_TOOL = REPO_ROOT / "multiagent" / "runtime" / "tools" / "agent-pi-interactive"
+HEARTBEAT_TOOL = REPO_ROOT / "multiagent" / "runtime" / "tools" / "heartbeat"
+AGENT_INPUT_TOOL = REPO_ROOT / "multiagent" / "runtime" / "tools" / "agent-input"
+MULTIAGENT_UI_TOOL = REPO_ROOT / "multiagent" / "runtime" / "tools" / "multiagent-ui"
 
 
 class CliTest(unittest.TestCase):
@@ -34,11 +34,11 @@ class CliTest(unittest.TestCase):
         self.env = os.environ.copy()
         pythonpath = self.env.get("PYTHONPATH")
         self.env["PYTHONPATH"] = str(REPO_ROOT) if not pythonpath else f"{REPO_ROOT}{os.pathsep}{pythonpath}"
-        self.env["GIT_MULTIAGENT_REGISTRY_DIR"] = str(self.repo / ".registry")
+        self.env["MULTIAGENT_REGISTRY_DIR"] = str(self.repo / ".registry")
 
     def tearDown(self) -> None:
         subprocess.run(
-            [sys.executable, "-m", "git_multiagent", "local", "stop"],
+            [sys.executable, "-m", "multiagent", "local", "stop"],
             cwd=self.repo,
             env=self.env,
             stdout=subprocess.PIPE,
@@ -50,7 +50,7 @@ class CliTest(unittest.TestCase):
 
     def run_agents(self, *args: str, input_text: str | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
         proc = subprocess.run(
-            [sys.executable, "-m", "git_multiagent", *args],
+            [sys.executable, "-m", "multiagent", *args],
             cwd=self.repo,
             env=self.env,
             input=input_text,
@@ -74,7 +74,7 @@ class CliTest(unittest.TestCase):
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         proc = subprocess.run(
-            [sys.executable, "-m", "git_multiagent", *args],
+            [sys.executable, "-m", "multiagent", *args],
             cwd=self.repo,
             env=env,
             stdout=subprocess.PIPE,
@@ -91,7 +91,7 @@ class CliTest(unittest.TestCase):
         return proc
 
     def state_path(self) -> Path:
-        from git_multiagent import cli
+        from multiagent import cli
 
         return self.repo / ".registry" / "state" / cli.registry_instance_id(self.repo)
 
@@ -154,15 +154,15 @@ class CliTest(unittest.TestCase):
         return proc, lines
 
     def run_runtime_bin(self, state: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        git_multiagent_dir = self.repo / ".multiagent"
-        runtime_bin = REPO_ROOT / "git_multiagent" / "runtime" / "bin"
+        multiagent_dir = self.repo / ".multiagent"
+        runtime_bin = REPO_ROOT / "multiagent" / "runtime" / "bin"
         env = self.env.copy()
-        env["GIT_MULTIAGENT_ROOT"] = str(git_multiagent_dir)
-        env["GIT_MULTIAGENT_REPO_ROOT"] = str(self.repo)
-        env["GIT_MULTIAGENT_STATE_DIR"] = str(state)
+        env["MULTIAGENT_ROOT"] = str(multiagent_dir)
+        env["MULTIAGENT_REPO_ROOT"] = str(self.repo)
+        env["MULTIAGENT_STATE_DIR"] = str(state)
         proc = subprocess.run(
             [str(runtime_bin / args[0]), *args[1:]],
-            cwd=git_multiagent_dir,
+            cwd=multiagent_dir,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -191,7 +191,7 @@ class CliTest(unittest.TestCase):
         (state / "agents" / agent / "current-job").write_text(f"{job}\n", encoding="utf-8")
 
     def load_agent_tool(self):
-        loader = importlib.machinery.SourceFileLoader("git_multiagent_runtime_agent_test", str(AGENT_TOOL))
+        loader = importlib.machinery.SourceFileLoader("multiagent_runtime_agent_test", str(AGENT_TOOL))
         spec = importlib.util.spec_from_loader(loader.name, loader)
         self.assertIsNotNone(spec)
         assert spec is not None
@@ -202,7 +202,7 @@ class CliTest(unittest.TestCase):
 
     def load_interactive_agent_tool(self):
         loader = importlib.machinery.SourceFileLoader(
-            "git_multiagent_runtime_interactive_agent_test",
+            "multiagent_runtime_interactive_agent_test",
             str(INTERACTIVE_AGENT_TOOL),
         )
         spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -214,7 +214,7 @@ class CliTest(unittest.TestCase):
         return module
 
     def load_ui_tool(self):
-        loader = importlib.machinery.SourceFileLoader("git_multiagent_runtime_ui_test", str(GIT_MULTIAGENT_UI_TOOL))
+        loader = importlib.machinery.SourceFileLoader("multiagent_runtime_ui_test", str(MULTIAGENT_UI_TOOL))
         spec = importlib.util.spec_from_loader(loader.name, loader)
         self.assertIsNotNone(spec)
         assert spec is not None
@@ -224,7 +224,7 @@ class CliTest(unittest.TestCase):
         return module
 
     def test_follow_agent_turn_finishes_partial_line_with_newline(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         agent_dir = self.repo / "operator"
         agent_dir.mkdir()
@@ -243,7 +243,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output.getvalue(), "agent response without newline\n")
 
     def test_start_and_supervisor_flags_are_minimal(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         parser = cli.build_parser(include_internal=True)
 
@@ -255,7 +255,7 @@ class CliTest(unittest.TestCase):
             self.assertFalse(hasattr(namespace, "heartbeat"))
 
     def test_serve_is_not_a_multiagent_subcommand(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         parser = cli.build_parser()
         with contextlib.redirect_stderr(io.StringIO()):
@@ -263,7 +263,7 @@ class CliTest(unittest.TestCase):
                 parser.parse_args(["serve"])
 
     def test_legacy_top_level_commands_are_not_subcommands(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         parser = cli.build_parser()
         with contextlib.redirect_stderr(io.StringIO()):
@@ -274,7 +274,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(parser.parse_args(["docker", "status"]).func, cli.cmd_docker)
 
     def test_heartbeat_is_configured_per_interactive_agent(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         agents = cli.parse_team_text(
             "\n".join(
@@ -315,7 +315,7 @@ class CliTest(unittest.TestCase):
             )
 
     def test_parse_heartbeat_value(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         self.assertEqual(cli.parse_heartbeat_value(None), 0)
         self.assertEqual(cli.parse_heartbeat_value(15), 15)
@@ -462,11 +462,11 @@ class CliTest(unittest.TestCase):
             json.dumps({"container_runtime": "docker", "container_name": "demo-container"}) + "\n",
             encoding="utf-8",
         )
-        from git_multiagent import cli
+        from multiagent import cli
 
         instances = self.repo / ".registry" / "instances"
         instances.mkdir(parents=True, exist_ok=True)
-        with mock.patch.dict(os.environ, {"GIT_MULTIAGENT_REGISTRY_DIR": str(self.repo / ".registry")}):
+        with mock.patch.dict(os.environ, {"MULTIAGENT_REGISTRY_DIR": str(self.repo / ".registry")}):
             repo = cli.discover_repo(self.repo)
             link = cli.registry_instance_path(repo)
             metadata = cli.registry_metadata_path(repo)
@@ -514,7 +514,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(summary["readyInteractiveCount"], 1)
 
     def test_dashboard_command_runs_registry_viewer(self) -> None:
-        from git_multiagent import dashboard
+        from multiagent import dashboard
 
         with mock.patch.object(dashboard.subprocess, "call", return_value=0) as call:
             self.assertEqual(dashboard.main(["--port", "0"]), 0)
@@ -528,7 +528,7 @@ class CliTest(unittest.TestCase):
             self.assertEqual(dashboard.main([]), 0)
 
     def test_rules_are_inspection_only(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         parser = cli.build_parser()
 
@@ -583,7 +583,7 @@ class CliTest(unittest.TestCase):
 
         state_dir = self.repo / ".registry" / "state" / "repo-123"
         self.write_local_role()
-        with mock.patch.dict(os.environ, {"GIT_MULTIAGENT_STATE_DIR": str(state_dir)}):
+        with mock.patch.dict(os.environ, {"MULTIAGENT_STATE_DIR": str(state_dir)}):
             prompt = interactive_tool.build_prompt(
                 "operator",
                 "planner",
@@ -649,7 +649,7 @@ class CliTest(unittest.TestCase):
         state_dir = self.repo / ".registry" / "state" / "repo-123"
         self.write_local_role()
 
-        with mock.patch.dict(os.environ, {"GIT_MULTIAGENT_STATE_DIR": str(state_dir)}):
+        with mock.patch.dict(os.environ, {"MULTIAGENT_STATE_DIR": str(state_dir)}):
             prompt = interactive_tool.build_prompt(
                 "operator",
                 "planner",
@@ -822,11 +822,11 @@ class CliTest(unittest.TestCase):
         self.assertIn("running", listing)
 
     def test_team_agent_command_launches_direct_agent_runner(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
-        git_multiagent_dir = self.repo / ".multiagent"
+        multiagent_dir = self.repo / ".multiagent"
         command = cli.team_agent_command(
-            git_multiagent_dir,
+            multiagent_dir,
             {
                 "name": "reviewer-1",
                 "role": "reviewer",
@@ -834,22 +834,22 @@ class CliTest(unittest.TestCase):
                 "model": "test-model",
             },
         )
-        self.assertEqual(command[:4], [sys.executable, "-m", "git_multiagent", "agent"])
+        self.assertEqual(command[:4], [sys.executable, "-m", "multiagent", "agent"])
         self.assertEqual(command[4:], ["worker", "--headless", "--model", "test-model", "reviewer", "reviewer-1"])
 
         interactive = cli.team_agent_command(
-            git_multiagent_dir,
+            multiagent_dir,
             {
                 "name": "planner-1",
                 "role": "planner",
                 "mode": "interactive",
             },
         )
-        self.assertEqual(interactive[:4], [sys.executable, "-m", "git_multiagent", "agent"])
+        self.assertEqual(interactive[:4], [sys.executable, "-m", "multiagent", "agent"])
         self.assertEqual(interactive[4:], ["interactive", "--headless", "planner", "planner-1"])
 
     def test_agent_runtime_main_forwards_options(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         calls: list[list[str]] = []
 
@@ -866,7 +866,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(calls[0], ["/runtime/agent-pi-interactive", "--headless", "role", "agent-1"])
 
     def test_agent_runtime_strips_argument_delimiter(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         calls: list[list[str]] = []
 
@@ -973,10 +973,10 @@ class CliTest(unittest.TestCase):
 
 
     def test_foreground_restart_ignores_stale_current_pid(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         self.run_agents("local", "init")
-        with mock.patch.dict(os.environ, {"GIT_MULTIAGENT_REGISTRY_DIR": str(self.repo / ".registry")}):
+        with mock.patch.dict(os.environ, {"MULTIAGENT_REGISTRY_DIR": str(self.repo / ".registry")}):
             repo = cli.discover_repo(self.repo)
         (repo.state_dir / "runs" / "supervisor.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
 
@@ -990,17 +990,17 @@ class CliTest(unittest.TestCase):
         stop_supervisor.assert_not_called()
 
     def test_discover_repo_honors_explicit_state_dir(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         self.run_agents("local", "init")
         state_dir = self.repo / ".custom-state"
-        with mock.patch.dict(os.environ, {"GIT_MULTIAGENT_STATE_DIR": str(state_dir)}):
+        with mock.patch.dict(os.environ, {"MULTIAGENT_STATE_DIR": str(state_dir)}):
             repo = cli.discover_repo(self.repo)
 
         self.assertEqual(repo.state_dir, state_dir.resolve())
 
     def test_container_local_runtime_does_not_write_host_registry(self) -> None:
-        from git_multiagent import cli
+        from multiagent import cli
 
         self.run_agents("local", "init")
         state_dir = self.repo / ".custom-state"
@@ -1008,9 +1008,9 @@ class CliTest(unittest.TestCase):
         with mock.patch.dict(
             os.environ,
             {
-                "GIT_MULTIAGENT_CONTAINER": "docker",
-                "GIT_MULTIAGENT_STATE_DIR": str(state_dir),
-                "GIT_MULTIAGENT_REGISTRY_DIR": str(registry_dir),
+                "MULTIAGENT_CONTAINER": "docker",
+                "MULTIAGENT_STATE_DIR": str(state_dir),
+                "MULTIAGENT_REGISTRY_DIR": str(registry_dir),
             },
         ):
             repo = cli.discover_repo(self.repo)

@@ -54,8 +54,8 @@ If the `grep` command fails, run `pi config` and set the default provider to
 Clone this repository and install it from the project root:
 
 ```sh
-git clone https://github.com/glguida/git-multiagent.git ~/git-agents
-cd ~/git-agents
+git clone https://github.com/glguida/multiagent.git ~/multiagent
+cd ~/multiagent
 python3 -m pip install --user -e .
 ```
 

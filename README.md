@@ -26,10 +26,10 @@ multiagent <command>
 
 ## Build And Install
 
-From the project root, not from the `git_multiagent/` import package directory:
+From the project root, not from the `multiagent/` import package directory:
 
 ```sh
-cd /path/to/git-agents
+cd /path/to/multiagent
 python3 -m pip install --user -e .
 ```
 
@@ -227,7 +227,7 @@ container. The shared state base `~/.multiagent/state/` is also mounted at
 the same absolute path so containerized systems use the same instance state tree
 as native systems. Each run gets a per-run handoff directory under
 `~/.multiagent/runs/<name>`, mounted at the same path, for generated Pi
-configuration and the host auth proxy socket. `/home/gitmultiagent` is the
+configuration and the host auth proxy socket. `/home/multiagent` is the
 container's own home in its Docker writable layer.
 
 `multiagent docker stop` stops the container and removes the host dashboard
@@ -237,7 +237,7 @@ that container and are available after the next `multiagent docker start`.
 `multiagent docker destroy` stops and removes the container, which also removes that
 writable-layer state.
 
-Pi runs inside the container with generated `/home/gitmultiagent/.pi` settings
+Pi runs inside the container with generated `/home/multiagent/.pi` settings
 that point model requests at a host auth proxy over a per-run Unix socket. The
 current Docker host-auth adapter supports Pi's `openai-codex` provider: the
 host proxy owns the real OAuth credentials from the active host Pi agent

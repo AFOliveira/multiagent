@@ -3,14 +3,14 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "git-multiagent"
+name = "multiagent"
 version = "0.2.0"
 description = "Git-native coding agent workflow extension"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-  { name = "git-multiagent contributors" }
+  { name = "multiagent contributors" }
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -26,23 +26,25 @@ classifiers = [
 dependencies = []
 
 [project.scripts]
-multiagent = "git_multiagent.cli:main"
+multiagent = "multiagent.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/glguida/git-multiagent"
-Repository = "https://github.com/glguida/git-multiagent"
+Homepage = "https://github.com/glguida/multiagent"
+Repository = "https://github.com/glguida/multiagent"
 
 [tool.setuptools.packages.find]
-include = ["git_multiagent*"]
+include = ["multiagent*"]
 
 [tool.setuptools.package-data]
-git_multiagent = [
+multiagent = [
+  ".dockerignore",
   "templates/AGENTS.md",
   "templates/roles/*.md",
   "templates/team.toml",
   "runtime/bin/*",
   "runtime/tools/*",
-  "runtime/tools/git-multiagent-public/*",
+  "runtime/tools/multiagent-public/*",
+  "docker_context/*",
 ]
 
 [tool.setuptools.data-files]

@@ -12,7 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from git_multiagent import runner
+from multiagent import runner
 
 
 class RunnerTest(unittest.TestCase):
@@ -94,7 +94,7 @@ class RunnerTest(unittest.TestCase):
             registry_dir=registry,
             state_base_dir=state_base,
             state_dir=state_dir,
-            image="git-multiagent:test",
+            image="multiagent:test",
             source_fingerprint="source-fingerprint",
             name="demo",
             run_dir=run_dir,
@@ -140,7 +140,7 @@ class RunnerTest(unittest.TestCase):
 
         return side_effect
 
-    def test_docker_command_runs_git_multiagent_through_container_auth_relay(self) -> None:
+    def test_docker_command_runs_multiagent_through_container_auth_relay(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp).resolve()
             config = self.make_config(base)
@@ -152,21 +152,21 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("--detach", command)
         self.assertIn("--mount", command)
         self.assertNotIn("--user", command)
-        self.assertIn("GIT_MULTIAGENT_HOST_UID=1000", command)
-        self.assertIn("GIT_MULTIAGENT_HOST_GID=1001", command)
+        self.assertIn("MULTIAGENT_HOST_UID=1000", command)
+        self.assertIn("MULTIAGENT_HOST_GID=1001", command)
         self.assertIn("EXTRA=value", command)
         self.assertIn(f"HOME={runner.CONTAINER_HOME}", command)
         self.assertNotIn("PIP_USER=1", command)
-        self.assertIn(f"GIT_MULTIAGENT_PI_CONFIG_DIR={config.pi_config_dir}", command)
-        self.assertIn(f"GIT_MULTIAGENT_REGISTRY_DIR={config.registry_dir}", command)
-        self.assertIn(f"GIT_MULTIAGENT_STATE_DIR={config.state_dir}", command)
+        self.assertIn(f"MULTIAGENT_PI_CONFIG_DIR={config.pi_config_dir}", command)
+        self.assertIn(f"MULTIAGENT_REGISTRY_DIR={config.registry_dir}", command)
+        self.assertIn(f"MULTIAGENT_STATE_DIR={config.state_dir}", command)
         self.assertIn(f"{runner.SOURCE_FINGERPRINT_LABEL}={config.source_fingerprint}", command)
         self.assertIn(f"{runner.RUN_CONFIG_FINGERPRINT_LABEL}={runner.run_config_fingerprint(config)}", command)
         self.assertIn(runner.Mount(config.state_base_dir, config.state_base_dir, "rw").docker_value(), command)
         self.assertIn(runner.Mount(config.run_dir, config.run_dir, "rw").docker_value(), command)
         self.assertNotIn(runner.Mount(config.registry_dir, config.registry_dir, "rw").docker_value(), command)
         self.assertNotIn(f"dst={runner.CONTAINER_HOME}", " ".join(command))
-        self.assertIn("git_multiagent.auth_relay", command)
+        self.assertIn("multiagent.auth_relay", command)
         self.assertEqual(command[-5:], ["multiagent", "local", "start", "--foreground", "--restart"])
         self.assertNotIn("docker", command[1:])
         self.assertNotIn("cp", command)
@@ -239,7 +239,7 @@ class RunnerTest(unittest.TestCase):
 
 
     def test_auth_relay_forwards_sigterm_to_child(self) -> None:
-        from git_multiagent import auth_relay  # noqa: F401 - ensure module import is covered
+        from multiagent import auth_relay  # noqa: F401 - ensure module import is covered
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp).resolve()
@@ -265,7 +265,7 @@ class RunnerTest(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "git_multiagent.auth_relay",
+                    "multiagent.auth_relay",
                     "--socket",
                     str(base / "host-auth.sock"),
                     "--listen",

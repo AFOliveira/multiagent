@@ -30,8 +30,9 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/multiagent
-COPY . /opt/multiagent
-RUN install -m 0755 docker/entrypoint.sh /usr/local/bin/multiagent-container-entrypoint \
+COPY docker_context/pyproject.toml /opt/multiagent/pyproject.toml
+COPY . /opt/multiagent/multiagent
+RUN install -m 0755 multiagent/docker_context/entrypoint.sh /usr/local/bin/multiagent-container-entrypoint \
     && python -m pip install .
 
 ENTRYPOINT ["tini", "--", "/usr/local/bin/multiagent-container-entrypoint"]
