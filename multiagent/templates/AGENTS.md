@@ -37,6 +37,60 @@ Call the package command directly, such as `multiagent agent task list`. The
 launcher sets the environment needed for those commands to find the correct
 repository configuration and instance state.
 
+### Command Whitelist
+
+Agents may only run `multiagent` commands explicitly allowed in this section.
+All other `multiagent` commands are operator-only. If a command is not listed
+here, do not run it even if it appears useful or safe.
+
+Allowed read-only local commands for the current instance:
+
+- `multiagent local status`
+- `multiagent local agents list`
+- `multiagent local log ...`
+
+Allowed system inspection commands:
+
+- `multiagent system info`
+- `multiagent system status`
+- `multiagent system dashboard`
+
+Allowed task commands:
+
+- `multiagent agent task list`
+- `multiagent agent task show ...`
+- `multiagent agent task comment ...`
+- `multiagent agent task result ...`
+- `multiagent agent task create ...`, only for an interactive agent handling a
+  direct human request or a planner creating an authorized task
+
+Allowed job commands:
+
+- `multiagent agent job list`
+- `multiagent agent job mine`
+- `multiagent agent job watch ...`
+- `multiagent agent job create ...`, only when creating an authorized follow-up
+  job on a task
+- `multiagent agent job start ...`, only for the worker's currently assigned job
+- `multiagent agent job done ...`, only for the worker's currently assigned job
+- `multiagent agent job fail ...`, only for the worker's currently assigned job
+- `multiagent agent job release ...`, only for the worker's currently assigned
+  job
+
+Process control is operator-only. Agents must not start, stop, restart,
+destroy, reset, kill, reap, or otherwise signal supervisors, containers,
+dashboards, projects, jobs, or other agents unless the exact command is listed
+above. This applies to the current project and every other project in the
+system. Container-local process IDs are not globally meaningful, and using local
+process-control commands from inside an agent can stop the wrong supervisor or
+kill the agent's own system.
+
+If a supervisor, worker, interactive agent, project, task, or job appears stuck,
+do not try to repair it. Record the evidence and notify the planner or
+root/operator through the current task. Include the project, state directory,
+agent name, job ID, commands inspected, output observed, and the operator action
+you believe is needed.
+
 Do not bypass the `multiagent agent` tools, edit queue machinery by hand, or
 debug/repair the task or job machinery while doing a normal project job. If a
 tool fails, record the exact command and output, create a planner notification

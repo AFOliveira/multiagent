@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -186,6 +188,112 @@ class SystemTest(unittest.TestCase):
         self.assertIn("--device", start_command)
         self.assertIn(str(device), start_command)
         self.assertIn("--restart", start_command)
+
+    def test_info_reports_configured_system_when_stopped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "root"
+            shared = base / "shared"
+            device = base / "ttyUSB0"
+            repo = self.make_repo(base)
+            shared.mkdir()
+            device.touch()
+            config = system.SystemConfig(
+                root=root,
+                dashboard=system.DashboardConfig(host="0.0.0.0", port=4139),
+                mounts=[system.MountConfig(shared, "rw")],
+                devices=[system.DeviceConfig(device)],
+                projects=[system.ProjectConfig("main", repo, "docker")],
+            )
+            system.save_config(system.config_path_for_root(root), config)
+            output = io.StringIO()
+
+            with contextlib.redirect_stdout(output), \
+                mock.patch.object(system, "docker_system_containers", return_value=[]), \
+                mock.patch.object(system, "docker_container_state", return_value="missing"):
+                self.assertEqual(system.main(["info", "-r", str(root)]), 0)
+
+            text = output.getvalue()
+
+        self.assertIn(f"root: {root}", text)
+        self.assertIn(f"config: {root / 'system.toml'}", text)
+        self.assertIn("dashboard:", text)
+        self.assertIn("url: http://0.0.0.0:4139", text)
+        self.assertIn("state: stopped", text)
+        self.assertIn("mounts:", text)
+        self.assertIn(f"rw\t{shared}\texists", text)
+        self.assertIn("devices:", text)
+        self.assertIn(f"{device}\texists", text)
+        self.assertIn("projects:", text)
+        self.assertIn("main:", text)
+        self.assertIn(f"repo: {repo} (exists)", text)
+        self.assertIn("container: multiagent-repo-", text)
+
+    def test_info_uses_runtime_snapshot_when_canonical_config_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "root"
+            repo = self.make_repo(base)
+            config = system.SystemConfig(
+                root=root,
+                dashboard=system.DashboardConfig(host="127.0.0.1", port=4999),
+                projects=[system.ProjectConfig("main", repo, "docker")],
+            )
+            snapshot = system.system_snapshot_path(root)
+            system.save_config(snapshot, config)
+            (root / "runs" / "system" / "dashboard.pid").write_text("43210\n", encoding="utf-8")
+            output = io.StringIO()
+
+            with contextlib.redirect_stdout(output), \
+                mock.patch.object(system, "docker_system_containers", return_value=[]), \
+                mock.patch.object(system, "pid_is_running", return_value=True), \
+                mock.patch.object(system, "docker_container_state", return_value="running"):
+                self.assertEqual(system.main(["info", "-r", str(root)]), 0)
+
+            text = output.getvalue()
+
+        self.assertIn(f"config: {snapshot}", text)
+        self.assertIn(f"canonical config: {root / 'system.toml'} (missing)", text)
+        self.assertIn("state: running", text)
+        self.assertIn("pid: 43210", text)
+        self.assertIn("container: multiagent-repo-", text)
+        self.assertIn("(running)", text)
+
+    def test_info_discovers_running_docker_system_without_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "root"
+            shared = base / "shared"
+            device = base / "ttyUSB0"
+            repo = self.make_repo(base)
+            shared.mkdir()
+            device.touch()
+            state_dir = root / "state" / system.project_instance_id(repo)
+            state_dir.mkdir(parents=True)
+            container = system.DockerContainerInfo(
+                name="multiagent-repo-123",
+                state="running",
+                repo=repo,
+                state_dir=state_dir,
+                mounts=[system.MountConfig(shared, "rw")],
+                devices=[system.DeviceConfig(device)],
+            )
+            output = io.StringIO()
+
+            with contextlib.redirect_stdout(output), \
+                mock.patch.object(system, "docker_system_containers", return_value=[container]):
+                self.assertEqual(system.main(["info", "-r", str(root)]), 0)
+
+            text = output.getvalue()
+
+        self.assertIn(f"root: {root}", text)
+        self.assertIn("config: none", text)
+        self.assertIn(f"canonical config: {root / 'system.toml'} (missing)", text)
+        self.assertIn(f"rw\t{shared}\texists", text)
+        self.assertIn(f"{device}\texists", text)
+        self.assertIn(f"repo: {repo} (exists)", text)
+        self.assertIn(f"state: {state_dir} (exists)", text)
+        self.assertIn("container: multiagent-repo-123 (running)", text)
 
 
 if __name__ == "__main__":

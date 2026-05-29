@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -61,12 +62,30 @@ class SystemConfig:
     projects: list[ProjectConfig] = field(default_factory=list)
 
 
+@dataclass
+class DockerContainerInfo:
+    name: str
+    state: str
+    repo: Path
+    state_dir: Path | None = None
+    mounts: list[MountConfig] = field(default_factory=list)
+    devices: list[DeviceConfig] = field(default_factory=list)
+
+
 def timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def normalize_path(value: str | Path) -> Path:
     return Path(value).expanduser().resolve()
+
+
+def path_is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def validate_name(label: str, value: str) -> None:
@@ -235,8 +254,23 @@ def config_path_for_root(root: str | Path) -> Path:
     return normalize_path(root) / DEFAULT_CONFIG
 
 
+def system_snapshot_path(root: str | Path) -> Path:
+    return normalize_path(root) / "runs" / "system" / "system.toml"
+
+
 def config_path(args: argparse.Namespace) -> Path:
     return config_path_for_root(config_root(args))
+
+
+def load_config_for_info(args: argparse.Namespace) -> tuple[SystemConfig, Path, Path | None]:
+    root = config_root(args)
+    canonical = config_path_for_root(root)
+    if canonical.exists():
+        return load_config(canonical), canonical, None
+    snapshot = system_snapshot_path(root)
+    if snapshot.exists():
+        return load_config(snapshot), snapshot, canonical
+    return load_config(canonical), canonical, None
 
 
 def load_config(path: Path) -> SystemConfig:
@@ -268,6 +302,130 @@ def git_repo_root(path: Path) -> Path:
 def default_project_name(repo: Path) -> str:
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", repo.name).strip(".-")
     return name or "project"
+
+
+def project_instance_id(repo: Path) -> str:
+    digest = hashlib.sha256(str(repo.resolve()).encode("utf-8")).hexdigest()
+    repo_name = re.sub(r"[^A-Za-z0-9._-]+", "-", repo.name).strip(".-")
+    if not repo_name:
+        repo_name = "repo"
+    return f"{repo_name}-{digest[:12]}"
+
+
+def project_state_dir(config: SystemConfig, project: ProjectConfig) -> Path:
+    return config.root / "state" / project_instance_id(project.repo)
+
+
+def docker_container_name(repo: Path) -> str:
+    digest = hashlib.sha256(str(repo).encode("utf-8")).hexdigest()[:12]
+    stem = re.sub(r"[^a-z0-9_.-]+", "-", repo.name.lower()).strip(".-") or "repo"
+    return f"multiagent-{stem}-{digest}"
+
+
+def docker_container_state(name: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Status}}", name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return "unknown (docker not found)"
+    if proc.returncode != 0:
+        return "missing"
+    return proc.stdout.strip() or "unknown"
+
+
+def docker_system_containers(root: Path) -> list[DockerContainerInfo]:
+    try:
+        proc = subprocess.run(
+            ["docker", "ps", "-a", "--filter", "label=multiagent.run=1", "--format", "{{.Names}}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return []
+    if proc.returncode != 0:
+        return []
+    containers: list[DockerContainerInfo] = []
+    for name in [line.strip() for line in proc.stdout.splitlines() if line.strip()]:
+        inspect = subprocess.run(
+            ["docker", "inspect", name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+        if inspect.returncode != 0:
+            continue
+        try:
+            data = json.loads(inspect.stdout)[0]
+        except (IndexError, json.JSONDecodeError, TypeError):
+            continue
+        env = {}
+        for item in data.get("Config", {}).get("Env") or []:
+            key, _, value = str(item).partition("=")
+            env[key] = value
+        registry = env.get(REGISTRY_ENV, "").strip()
+        state_value = env.get("MULTIAGENT_STATE_DIR", "").strip()
+        registry_root = normalize_path(registry) if registry else None
+        state_dir = normalize_path(state_value) if state_value else None
+        if registry_root != root and not (state_dir and path_is_under(state_dir, root / "state")):
+            continue
+        labels = data.get("Config", {}).get("Labels") or {}
+        repo_text = labels.get("multiagent.repo") or ""
+        if not repo_text:
+            continue
+        mounts = []
+        for mount in data.get("Mounts") or []:
+            if mount.get("Type") != "bind":
+                continue
+            source = normalize_path(str(mount.get("Source") or ""))
+            if path_is_under(source, root):
+                continue
+            mounts.append(MountConfig(source, "rw" if mount.get("RW", True) else "ro"))
+        devices = []
+        for device in data.get("HostConfig", {}).get("Devices") or []:
+            path = device.get("PathOnHost") or device.get("PathInContainer")
+            if path:
+                devices.append(DeviceConfig(normalize_path(str(path))))
+        containers.append(
+            DockerContainerInfo(
+                name=name,
+                state=str(data.get("State", {}).get("Status") or "unknown"),
+                repo=normalize_path(repo_text),
+                state_dir=state_dir,
+                mounts=mounts,
+                devices=devices,
+            )
+        )
+    return containers
+
+
+def discovered_config(root: Path, containers: list[DockerContainerInfo]) -> SystemConfig:
+    mounts_by_key: dict[tuple[Path, str], MountConfig] = {}
+    devices_by_path: dict[Path, DeviceConfig] = {}
+    projects_by_repo: dict[Path, ProjectConfig] = {}
+    for container in containers:
+        for mount in container.mounts:
+            mounts_by_key[(mount.path, mount.mode)] = mount
+        for device in container.devices:
+            devices_by_path[device.path] = device
+        projects_by_repo[container.repo] = ProjectConfig(default_project_name(container.repo), container.repo, "docker")
+    return SystemConfig(
+        root=root,
+        mounts=list(mounts_by_key.values()),
+        devices=list(devices_by_path.values()),
+        projects=list(projects_by_repo.values()),
+    )
+
+
+def path_state(path: Path) -> str:
+    return "exists" if path.exists() else "missing"
 
 
 def system_env(config: SystemConfig) -> dict[str, str]:
@@ -547,6 +705,75 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_info(args: argparse.Namespace) -> int:
+    root = config_root(args)
+    docker_containers = docker_system_containers(root)
+    try:
+        config, source, missing_canonical = load_config_for_info(args)
+    except UserError:
+        if not docker_containers:
+            raise
+        config = discovered_config(root, docker_containers)
+        source = None
+        missing_canonical = config_path_for_root(root)
+    container_by_repo = {container.repo: container for container in docker_containers}
+    pid = read_pid(dashboard_pid_path(config))
+    dashboard_running = pid_is_running(pid)
+    print(f"root: {config.root}")
+    print(f"config: {source if source is not None else 'none'}")
+    if missing_canonical is not None:
+        print(f"canonical config: {missing_canonical} (missing)")
+    print(f"state dir: {config.root / 'state'}")
+    print(f"instances dir: {config.root / 'instances'}")
+    print(f"runs dir: {config.root / 'runs'}")
+    print(f"logs dir: {config.root / 'logs'}")
+    print("")
+    print("dashboard:")
+    print(f"  url: http://{config.dashboard.host}:{config.dashboard.port}")
+    print(f"  state: {'running' if dashboard_running else 'stopped'}")
+    if pid is not None:
+        print(f"  pid: {pid}")
+    print(f"  pid file: {dashboard_pid_path(config)}")
+    print(f"  metadata: {dashboard_metadata_path(config)}")
+    print(f"  log: {dashboard_log_path(config)}")
+    print("")
+    print("mounts:")
+    if config.mounts:
+        for mount in config.mounts:
+            print(f"  {mount.mode}\t{mount.path}\t{path_state(mount.path)}")
+    else:
+        print("  none")
+    print("")
+    print("devices:")
+    if config.devices:
+        for device in config.devices:
+            print(f"  {device.path}\t{path_state(device.path)}")
+    else:
+        print("  none")
+    print("")
+    print("projects:")
+    if not config.projects:
+        print("  none")
+        return 0
+    for project in config.projects:
+        state_dir = project_state_dir(config, project)
+        print(f"  {project.name}:")
+        print(f"    runtime: {project.runtime}")
+        print(f"    repo: {project.repo} ({path_state(project.repo)})")
+        container = container_by_repo.get(project.repo)
+        if container and container.state_dir:
+            state_dir = container.state_dir
+        print(f"    state: {state_dir} ({path_state(state_dir)})")
+        print(f"    supervisor: {state_dir / 'runs' / 'supervisor.json'}")
+        if project.runtime == "docker":
+            if container is not None:
+                print(f"    container: {container.name} ({container.state})")
+            else:
+                container_name = docker_container_name(project.repo)
+                print(f"    container: {container_name} ({docker_container_state(container_name)})")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="multiagent system")
     parser.add_argument("-r", "--root", default=None, metavar="ROOT", help=f"system root (default: {DEFAULT_ROOT})")
@@ -609,6 +836,9 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="show system status")
     add_command_root(status)
     status.set_defaults(func=cmd_status)
+    info = subparsers.add_parser("info", help="show system configuration and runtime paths")
+    add_command_root(info)
+    info.set_defaults(func=cmd_info)
     dashboard_status = subparsers.add_parser("dashboard", help="show system dashboard status")
     add_command_root(dashboard_status)
     dashboard_status.set_defaults(func=cmd_dashboard)
