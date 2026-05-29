@@ -29,8 +29,8 @@ class SystemTest(unittest.TestCase):
     def test_init_and_add_commands_write_system_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            config_path = base / "system.toml"
             root = base / "root"
+            config_path = system.config_path_for_root(root)
             shared = base / "shared"
             device = base / "ttyUSB0"
             shared.mkdir()
@@ -38,12 +38,12 @@ class SystemTest(unittest.TestCase):
             repo = self.make_repo(base)
 
             self.assertEqual(
-                system.main(["--file", str(config_path), "init", "--root", str(root), "--host", "0.0.0.0", "--port", "4200"]),
+                system.main(["init", "-r", str(root), "-h", "0.0.0.0", "-p", "4200"]),
                 0,
             )
-            self.assertEqual(system.main(["--file", str(config_path), "add-mount", str(shared), "--mode", "ro"]), 0)
-            self.assertEqual(system.main(["--file", str(config_path), "add-dev", str(device)]), 0)
-            self.assertEqual(system.main(["--file", str(config_path), "add", str(repo), "--name", "main"]), 0)
+            self.assertEqual(system.main(["add-mount", "-r", str(root), str(shared), "--mode", "ro"]), 0)
+            self.assertEqual(system.main(["add-dev", "-r", str(root), str(device)]), 0)
+            self.assertEqual(system.main(["add", "-r", str(root), str(repo), "--name", "main"]), 0)
 
             config = system.load_config(config_path)
 
@@ -57,21 +57,37 @@ class SystemTest(unittest.TestCase):
     def test_init_defaults_to_user_multiagent_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            config_path = base / "system.toml"
             home = base / "home"
             home.mkdir()
 
             with mock.patch.dict(os.environ, {"HOME": str(home)}):
-                self.assertEqual(system.main(["--file", str(config_path), "init"]), 0)
+                self.assertEqual(system.main(["init"]), 0)
+            config_path = home / ".multiagent" / "system.toml"
             config = system.load_config(config_path)
 
         self.assertEqual(config.root, home / ".multiagent")
 
+    def test_init_uses_root_config_not_current_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "system-root"
+            (base / "system.toml").write_text('root = "/wrong"\n', encoding="utf-8")
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(base)
+                self.assertEqual(system.main(["init", "--root", str(root)]), 0)
+            finally:
+                os.chdir(old_cwd)
+
+            config = system.load_config(system.config_path_for_root(root))
+
+        self.assertEqual(config.root, root.resolve())
+
     def test_start_starts_projects_and_dashboard_under_system_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            config_path = base / "system.toml"
             root = base / "root"
+            config_path = system.config_path_for_root(root)
             shared = base / "shared"
             device = base / "ttyUSB0"
             repo = self.make_repo(base)
@@ -94,7 +110,7 @@ class SystemTest(unittest.TestCase):
             with mock.patch.object(system.subprocess, "call", side_effect=fake_call), \
                 mock.patch.object(system.subprocess, "Popen", return_value=FakeProcess()), \
                 mock.patch.object(system.time, "sleep"):
-                self.assertEqual(system.main(["--file", str(config_path), "start"]), 0)
+                self.assertEqual(system.main(["start", "-r", str(root)]), 0)
 
             metadata = json.loads((root / "runs" / "system" / "dashboard.json").read_text(encoding="utf-8"))
 
@@ -113,8 +129,8 @@ class SystemTest(unittest.TestCase):
     def test_stop_stops_projects_and_dashboard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            config_path = base / "system.toml"
             root = base / "root"
+            config_path = system.config_path_for_root(root)
             repo = self.make_repo(base)
             config = system.SystemConfig(root=root, projects=[system.ProjectConfig("main", repo, "docker")])
             system.save_config(config_path, config)
@@ -129,7 +145,7 @@ class SystemTest(unittest.TestCase):
             with mock.patch.object(system.subprocess, "call", side_effect=fake_call), \
                 mock.patch.object(system, "pid_is_running", return_value=True), \
                 mock.patch.object(system, "stop_pid_group") as stop_pid_group:
-                self.assertEqual(system.main(["--file", str(config_path), "stop"]), 0)
+                self.assertEqual(system.main(["stop", "-r", str(root)]), 0)
 
         self.assertEqual(calls[0][:5], [sys.executable, "-m", "multiagent", "docker", "stop"])
         stop_pid_group.assert_called_once_with(43210)
@@ -138,8 +154,8 @@ class SystemTest(unittest.TestCase):
     def test_restart_uses_current_mounts_and_devices(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            config_path = base / "system.toml"
             root = base / "root"
+            config_path = system.config_path_for_root(root)
             shared = base / "shared"
             device = base / "ttyUSB0"
             repo = self.make_repo(base)
@@ -161,7 +177,7 @@ class SystemTest(unittest.TestCase):
             with mock.patch.object(system.subprocess, "call", side_effect=fake_call), \
                 mock.patch.object(system.subprocess, "Popen", return_value=FakeProcess()), \
                 mock.patch.object(system.time, "sleep"):
-                self.assertEqual(system.main(["--file", str(config_path), "restart"]), 0)
+                self.assertEqual(system.main(["restart", "-r", str(root)]), 0)
 
         start_command = calls[-1]
         self.assertEqual(start_command[:5], [sys.executable, "-m", "multiagent", "docker", "start"])

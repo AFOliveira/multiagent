@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_CONFIG = "multiagent-system.toml"
+DEFAULT_CONFIG = "system.toml"
 DEFAULT_ROOT = "~/.multiagent"
 DEFAULT_DASHBOARD_HOST = "127.0.0.1"
 DEFAULT_DASHBOARD_PORT = 4137
@@ -226,8 +226,17 @@ def format_system_toml(config: SystemConfig) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def config_root(args: argparse.Namespace) -> Path:
+    value = getattr(args, "command_root", None) or getattr(args, "root", None) or DEFAULT_ROOT
+    return normalize_path(value)
+
+
+def config_path_for_root(root: str | Path) -> Path:
+    return normalize_path(root) / DEFAULT_CONFIG
+
+
 def config_path(args: argparse.Namespace) -> Path:
-    return normalize_path(args.file)
+    return config_path_for_root(config_root(args))
 
 
 def load_config(path: Path) -> SystemConfig:
@@ -413,7 +422,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     if path.exists() and not args.force:
         raise UserError(f"system config already exists: {path}")
     config = SystemConfig(
-        root=normalize_path(args.root),
+        root=config_root(args),
         dashboard=DashboardConfig(host=args.host, port=args.port),
     )
     save_config(path, config)
@@ -540,44 +549,69 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="multiagent system")
-    parser.add_argument("--file", default=DEFAULT_CONFIG, help=f"system config file (default: {DEFAULT_CONFIG})")
+    parser.add_argument("-r", "--root", default=None, metavar="ROOT", help=f"system root (default: {DEFAULT_ROOT})")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    init = subparsers.add_parser("init", help="create a MULTIAGENT system config")
-    init.add_argument("--root", default=DEFAULT_ROOT, help=f"single MULTIAGENT root for this system (default: {DEFAULT_ROOT})")
-    init.add_argument("--host", default=DEFAULT_DASHBOARD_HOST)
-    init.add_argument("--port", default=DEFAULT_DASHBOARD_PORT, type=int)
+    def add_command_root(command_parser: argparse.ArgumentParser) -> None:
+        command_parser.add_argument(
+            "-r",
+            "--root",
+            dest="command_root",
+            default=None,
+            metavar="ROOT",
+            help=f"system root (default: {DEFAULT_ROOT})",
+        )
+
+    init = subparsers.add_parser("init", help="create a MULTIAGENT system config", add_help=False)
+    init.add_argument("--help", action="help", help="show this help message and exit")
+    add_command_root(init)
+    init.add_argument("-h", "--host", default=DEFAULT_DASHBOARD_HOST)
+    init.add_argument("-p", "--port", default=DEFAULT_DASHBOARD_PORT, type=int)
     init.add_argument("--force", action="store_true")
     init.set_defaults(func=cmd_init)
 
     add_mount = subparsers.add_parser("add-mount", help="add a shared mount for all docker projects")
+    add_command_root(add_mount)
     add_mount.add_argument("path")
     add_mount.add_argument("--mode", choices=["ro", "rw"], default="rw")
     add_mount.set_defaults(func=cmd_add_mount)
 
     add_dev = subparsers.add_parser("add-dev", help="add a device for all docker projects")
+    add_command_root(add_dev)
     add_dev.add_argument("path")
     add_dev.set_defaults(func=cmd_add_dev)
 
     add = subparsers.add_parser("add", help="add a project repository")
+    add_command_root(add)
     add.add_argument("repo")
     add.add_argument("--name")
     add.add_argument("--runtime", choices=["docker", "local"], default="docker")
     add.add_argument("--replace", action="store_true")
     add.set_defaults(func=cmd_add_project)
 
-    dashboard = subparsers.add_parser("set-dashboard", help="configure the system dashboard")
-    dashboard.add_argument("--host")
-    dashboard.add_argument("--port", type=int)
+    dashboard = subparsers.add_parser("set-dashboard", help="configure the system dashboard", add_help=False)
+    dashboard.add_argument("--help", action="help", help="show this help message and exit")
+    add_command_root(dashboard)
+    dashboard.add_argument("-h", "--host")
+    dashboard.add_argument("-p", "--port", type=int)
     dashboard.set_defaults(func=cmd_set_dashboard)
 
     start = subparsers.add_parser("start", help="start projects and the dashboard")
+    add_command_root(start)
     start.add_argument("--restart", action="store_true")
     start.set_defaults(func=cmd_start)
-    subparsers.add_parser("stop", help="stop projects and the dashboard").set_defaults(func=cmd_stop)
-    subparsers.add_parser("restart", help="restart projects and the dashboard").set_defaults(func=cmd_restart)
-    subparsers.add_parser("status", help="show system status").set_defaults(func=cmd_status)
-    subparsers.add_parser("dashboard", help="show system dashboard status").set_defaults(func=cmd_dashboard)
+    stop = subparsers.add_parser("stop", help="stop projects and the dashboard")
+    add_command_root(stop)
+    stop.set_defaults(func=cmd_stop)
+    restart = subparsers.add_parser("restart", help="restart projects and the dashboard")
+    add_command_root(restart)
+    restart.set_defaults(func=cmd_restart)
+    status = subparsers.add_parser("status", help="show system status")
+    add_command_root(status)
+    status.set_defaults(func=cmd_status)
+    dashboard_status = subparsers.add_parser("dashboard", help="show system dashboard status")
+    add_command_root(dashboard_status)
+    dashboard_status.set_defaults(func=cmd_dashboard)
     return parser
 
 
