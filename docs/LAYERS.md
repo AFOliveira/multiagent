@@ -53,9 +53,11 @@ mode = "interactive"
 options = { heartbeat = 15 }
 ```
 
-Pi is always the runtime. `mode` chooses worker versus interactive behavior.
-`options.heartbeat` is only valid for interactive agents and is disabled when
-absent.
+`mode` chooses worker versus interactive behavior. Worker agents can select
+`engine = "pi"`, `codex`, `claude`, `codex-work`, `claude-work`, or `cursor`.
+Interactive agents must use Pi because live input is implemented through Pi
+RPC. `options.heartbeat` is only valid for interactive agents and is disabled
+when absent.
 
 ## Layer 3: Containerized Control
 

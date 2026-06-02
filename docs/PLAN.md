@@ -21,7 +21,8 @@ mode = "interactive"
 options = { heartbeat = 15 }
 ```
 
-Pi is always the runtime. The team file does not configure engines.
+Worker agents can select an engine. Interactive agents remain Pi-only because
+they use the Pi RPC runtime.
 
 ## Commands
 
@@ -30,8 +31,8 @@ Team management:
 ```sh
 multiagent local team list
 multiagent local team show [agent]
-multiagent local team add <agent> --role <role> [--mode worker|interactive]
-multiagent local team set <agent> [--role <role>] [--mode worker|interactive]
+multiagent local team add <agent> --role <role> [--mode worker|interactive] [--engine pi|codex|claude|codex-work|claude-work|cursor]
+multiagent local team set <agent> [--role <role>] [--mode worker|interactive] [--engine ...] [--model ...] [--thinking-effort ...]
 multiagent local team remove <agent>
 multiagent local team edit
 ```

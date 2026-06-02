@@ -7,9 +7,10 @@ These files are package-owned. They are launched through the installed
 `multiagent` command and are not copied into repository `.multiagent`
 directories.
 
-The helper launchers require `pi`. MULTIAGENT is Pi-based; `agent`,
-`agent-pi-interactive`, `multiagent-ui`, and the dashboard entry point use
-Python 3 stdlib only.
+The helper launchers require the configured agent CLI on `PATH`. Worker agents
+can run through Pi, Codex, Claude, wrapper CLIs, or Cursor. Interactive agents
+still require Pi because they use `pi --mode rpc`. The helper scripts and
+dashboard entry point use Python 3 stdlib only.
 
 ## `multiagent-ui`
 
@@ -73,9 +74,9 @@ The socket lives at:
 ## `agent`
 
 `agent` starts one named worker agent, claims one pending job for that agent's
-role, records the job in `agents/<agent-name>/current-job`, and renders Pi event
-output to `agents/<agent-name>/transcript.log`. By default it also prints the
-rendered transcript to stdout. Use `--headless` to write files only.
+role, records the job in `agents/<agent-name>/current-job`, and renders engine
+event output to `agents/<agent-name>/transcript.log`. By default it also prints
+the rendered transcript to stdout. Use `--headless` to write files only.
 
 It is normally launched by `multiagent local start`. For direct debugging, pass
 the state directory explicitly through `MULTIAGENT_STATE_DIR`:
@@ -88,9 +89,21 @@ MULTIAGENT_STATE_DIR=~/.multiagent/state/<instance-id> \
 Options:
 
 - `--headless`: do not print the rendered transcript to stdout.
-- `-m <model>`: pass a model name to Pi.
+- `--engine <engine>`: select `pi`, `codex`, `claude`, `codex-work`,
+  `claude-work`, or `cursor`.
+- `-m <model>`: pass a model name to the selected engine.
+- `--thinking-effort <effort>`: pass effort to engines that expose it. Pi maps
+  this to `--thinking`, Codex to `model_reasoning_effort`, and Claude to
+  `--effort`. Cursor does not expose a separate effort flag.
 
 CLI stderr is saved in `error.log`.
+
+Worker sessions are resumable per agent when the selected engine supports it.
+Pi uses `pi-session/`; Codex stores `<engine>-session-id` from the JSON thread
+event and resumes with `codex exec resume`; Claude stores `<engine>-session-id`
+and resumes with `--resume`; Cursor stores `cursor-chat-id` and resumes that
+chat. The job/task filesystem remains the source of truth if an engine cannot
+recover its private conversation state.
 
 ## `agent-pi-interactive`
 
@@ -102,6 +115,12 @@ accepts input on that agent's Unix socket.
 
 Humans normally talk to interactive agents with `multiagent local prompt <agent>`
 or from the dashboard's chat and agent inspector controls.
+
+Options:
+
+- `--headless`: do not print the rendered transcript to stdout.
+- `-m <model>`: pass a model name to Pi.
+- `--thinking-effort <effort>`: pass effort to Pi as `--thinking <effort>`.
 
 ## Task Commands
 

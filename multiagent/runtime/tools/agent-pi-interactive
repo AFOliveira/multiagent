@@ -41,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one named interactive MULTIAGENT agent.")
     parser.add_argument("--headless", action="store_true", help="Do not mirror rendered transcript output to stdout")
     parser.add_argument("-m", "--model")
+    parser.add_argument("--thinking-effort", "--effort", dest="thinking_effort")
     parser.add_argument("role")
     parser.add_argument("agent_name")
     return parser.parse_args()
@@ -86,12 +87,15 @@ def has_pi_session_history(session_dir: Path) -> bool:
 
 def build_pi_rpc_command(
     model: str | None,
+    thinking_effort: str | None,
     prompt: str,
     session_dir: Path,
 ) -> list[str]:
     command = ["pi", "--mode", "rpc"]
     if model:
         command.extend(["--model", model])
+    if thinking_effort:
+        command.extend(["--thinking", thinking_effort])
     command.extend(["--append-system-prompt", prompt])
     command.extend(["--session-dir", str(session_dir)])
     if has_pi_session_history(session_dir):
@@ -184,6 +188,8 @@ def main() -> int:
     agent_mod.write_file(agent_dir / "current-job", "")
     if args.model:
         agent_mod.write_file(agent_dir / "model", args.model)
+    if args.thinking_effort:
+        agent_mod.write_file(agent_dir / "thinking_effort", args.thinking_effort)
     agent_mod.write_file(agent_dir / "last_started_at", agent_mod.timestamp())
     agent_mod.write_runtime_pids(agent_dir)
 
@@ -311,13 +317,14 @@ def main() -> int:
                     f"role: {args.role}",
                     "mode: interactive",
                     f"model: {args.model}" if args.model else "",
+                    f"thinking_effort: {args.thinking_effort}" if args.thinking_effort else "",
                     f"rpc: agents/{args.agent_name}/rpc.sock",
                 )
                 if part
             ),
         )
 
-        command = build_pi_rpc_command(args.model, prompt, agent_dir / "pi-session")
+        command = build_pi_rpc_command(args.model, args.thinking_effort, prompt, agent_dir / "pi-session")
 
         proc = subprocess.Popen(
             command,

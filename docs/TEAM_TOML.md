@@ -57,12 +57,15 @@ The file contains one singular `[[agent]]` table per configured agent.
 name = "implementer-1"
 role = "implementer"
 mode = "worker"
-model = "openai/gpt-5"
+engine = "codex"
+model = "gpt-5.1-codex-max"
+thinking_effort = "high"
 
 [[agent]]
 name = "operator"
 role = "planner"
 mode = "interactive"
+engine = "pi"
 options = { heartbeat = 15 }
 ```
 
@@ -74,16 +77,25 @@ Supported fields:
   overrides or package role templates.
 - `mode`: optional; `worker` by default. Valid values are `worker` and
   `interactive`.
-- `model`: optional model passed to Pi as `--model <model>`.
+- `engine`: optional; `pi` by default. Worker agents support `pi`, `codex`,
+  `claude`, `codex-work`, `claude-work`, and `cursor`. Interactive agents must
+  use `pi`.
+- `model`: optional model passed to the selected CLI.
+- `thinking_effort`: optional effort level passed to engines that expose one.
+  Pi receives `--thinking`, Codex receives a `model_reasoning_effort` config
+  override, and Claude receives `--effort`. Cursor has no separate effort flag.
 - `options`: optional inline table. Currently `heartbeat = <minutes>` is
   supported for interactive agents.
-
-Pi is always the runtime. There is no `engine` field.
 
 ## Modes
 
 `mode = "worker"` starts a queued agent. It claims one pending job for its role,
 processes that job, records status, and exits.
+
+Worker agents keep per-agent engine session markers in their state directory
+when the selected CLI exposes resume support. Pi uses `pi-session/`; Codex,
+Claude, and Cursor store engine-specific session/chat id files and resume them
+on the next worker run.
 
 `mode = "interactive"` starts a persistent Pi RPC session. It does not claim a
 queued job on startup. It reads the configured role and accepts live input via a
@@ -126,8 +138,9 @@ Add and update agents:
 
 ```sh
 multiagent local team add implementer-2 --role implementer
+multiagent local team add reviewer-codex --role reviewer --engine codex --model gpt-5.1-codex-max --thinking-effort high
 multiagent local team add operator --role planner --mode interactive --heartbeat 15
-multiagent local team set implementer-2 --model openai/gpt-5
+multiagent local team set implementer-2 --engine claude --model sonnet --thinking-effort max
 multiagent local team set operator --no-heartbeat
 multiagent local team remove implementer-2
 ```
@@ -160,8 +173,9 @@ you need to stop active runtime agents.
 
 ## Current Limits
 
-`team.toml` can configure agent name, role, mode, model, and heartbeat. It does
-not currently configure per-agent Pi extensions, skills, tool allowlists,
-provider settings, environment variables, socket path overrides, or arbitrary Pi
-command-line arguments. Those settings must currently be handled through Pi's
-own configuration or by changing the MULTIAGENT launch implementation.
+`team.toml` can configure agent name, role, mode, engine, model,
+thinking_effort, and heartbeat. It does not currently configure per-agent
+extensions, skills, tool allowlists, provider settings, environment variables,
+socket path overrides, or arbitrary engine command-line arguments. Those
+settings must currently be handled through the selected CLI's own configuration
+or by changing the MULTIAGENT launch implementation.

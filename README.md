@@ -16,8 +16,9 @@ multiagent <command>
 
 - Git, Python 3.10 or newer, and `pip`.
 - A POSIX `sh` for the runtime helper scripts.
-- `pi`, which is the only supported agent runtime.
-- A working Pi login/provider configuration for native local runs.
+- At least one supported agent CLI for native local runs: `pi`, `codex`,
+  `claude`, `codex-work`, `claude-work`, or Cursor's `agent`.
+- A working login/provider configuration for whichever agent engines you use.
 - For Docker runs today, a working host Pi `openai-codex` provider. The Docker
   host-auth bridge is deliberately no-secret: it uses a local proxy and does not
   copy host provider tokens into the container.
@@ -267,10 +268,12 @@ never receives the host `auth.json`, access token, or refresh token.
 
 ### Major Limitation
 
-Native local runs pass each agent's `model` from `.multiagent/team.toml` directly
-to Pi as `--model <model>`. That model may be provider-qualified, such as
-`anthropic/claude-...` or `openai-codex/gpt-...`; Pi resolves it using the host
-Pi configuration.
+Native local runs pass each agent's `model` and optional `thinking_effort` from
+`.multiagent/team.toml` to the selected CLI engine. Pi receives `--model` and
+`--thinking`; Codex receives `--model` and a `model_reasoning_effort` config
+override; Claude receives `--model` and `--effort`; Cursor receives `--model`.
+Cursor does not expose a separate effort flag, so use a thinking-capable Cursor
+model name when needed.
 
 Docker runs do not currently project arbitrary Pi providers. The Docker auth
 projection is hard-coded to the `openai-codex` host-auth proxy and rejects host
@@ -303,13 +306,17 @@ multiagent dashboard
 
 The dashboard is served directly from installed package resources.
 
-## Pi-Based Agents
+## Agent Engines
 
-MULTIAGENT is Pi-based. Pi is always the agent runtime; `team.toml` does not
-choose runtime backends or auth providers. `model` is configurable per agent
-and is passed to Pi as `--model <model>`, so provider-qualified Pi model strings
-are valid in native local runs. Docker runs currently project only a no-secret
-host-auth adapter for Pi's `openai-codex` provider.
+MULTIAGENT worker agents can run through `pi`, `codex`, `claude`,
+`codex-work`, `claude-work`, or `cursor`. Interactive agents remain Pi-only
+because the live input path uses Pi RPC. Docker runs currently project only a
+no-secret host-auth adapter for Pi's `openai-codex` provider.
+
+Worker agent sessions are resumable per agent when the selected CLI exposes
+resume support. Pi keeps a `pi-session/` directory; Codex, Claude, and Cursor
+store session/chat ids in the agent state directory and reuse them on later
+worker runs.
 
 For stronger research and solution-finding, configure Pi directly. For example,
 `pi-web-access` adds web search, URL fetching, code/docs search, GitHub cloning,

@@ -32,6 +32,7 @@ STATE_DIR_NAME = "state"
 DEFAULT_REGISTRY_DIR = "~/.multiagent"
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 VALID_MODES = {"worker", "interactive"}
+VALID_ENGINES = {"pi", "codex", "claude", "codex-work", "claude-work", "cursor"}
 PI_COMMAND = "pi"
 STATE_SUBDIRS = ("tasks", "jobs", "agents", "runs", "logs")
 
@@ -565,7 +566,9 @@ def parse_team_text(text: str) -> list[dict[str, Any]]:
         name = str(item.get("name", "")).strip()
         role = str(item.get("role", "")).strip()
         mode = str(item.get("mode", "worker") or "worker").strip()
+        engine = str(item.get("engine", "pi") or "pi").strip()
         model = str(item.get("model", "") or "").strip()
+        thinking_effort = str(item.get("thinking_effort", "") or "").strip()
         validate_name("agent", name)
         validate_name("role", role)
         if mode not in VALID_MODES:
@@ -573,12 +576,21 @@ def parse_team_text(text: str) -> list[dict[str, Any]]:
                 f"invalid mode '{mode}' for agent '{name}': expected "
                 + ", ".join(sorted(VALID_MODES))
             )
+        if engine not in VALID_ENGINES:
+            raise UserError(
+                f"invalid engine '{engine}' for agent '{name}': expected "
+                + ", ".join(sorted(VALID_ENGINES))
+            )
+        if mode == "interactive" and engine != "pi":
+            raise UserError(f"agent '{name}' must use engine = \"pi\" with mode = \"interactive\"")
         options = parse_agent_options(item.get("options"), name)
         if options.get("heartbeat") and mode != "interactive":
             raise UserError(f"agent '{name}' must use mode = \"interactive\" to enable heartbeat")
-        row: dict[str, Any] = {"name": name, "role": role, "mode": mode}
+        row: dict[str, Any] = {"name": name, "role": role, "mode": mode, "engine": engine}
         if model:
             row["model"] = model
+        if thinking_effort:
+            row["thinking_effort"] = thinking_effort
         if options:
             row["options"] = options
         result.append(row)
@@ -600,8 +612,12 @@ def format_team(agents: list[dict[str, Any]]) -> str:
         lines.append(f"name = {toml_quote(agent['name'])}")
         lines.append(f"role = {toml_quote(agent['role'])}")
         lines.append(f"mode = {toml_quote(agent.get('mode', 'worker'))}")
+        if agent.get("engine") and agent.get("engine") != "pi":
+            lines.append(f"engine = {toml_quote(agent['engine'])}")
         if agent.get("model"):
             lines.append(f"model = {toml_quote(agent['model'])}")
+        if agent.get("thinking_effort"):
+            lines.append(f"thinking_effort = {toml_quote(agent['thinking_effort'])}")
         heartbeat = (agent.get("options") or {}).get("heartbeat")
         if heartbeat:
             lines.append(f"options = {{ heartbeat = {int(heartbeat)} }}")
@@ -923,13 +939,15 @@ def cmd_team_list(_args: argparse.Namespace) -> int:
                 agent["name"],
                 agent["role"],
                 agent["mode"],
+                agent.get("engine", "pi"),
                 agent.get("model", ""),
+                agent.get("thinking_effort", ""),
                 str((agent.get("options") or {}).get("heartbeat", "")),
                 state,
                 source,
             ]
         )
-    print_table(["agent", "role", "mode", "model", "heartbeat", "state", "source"], rows)
+    print_table(["agent", "role", "mode", "engine", "model", "effort", "heartbeat", "state", "source"], rows)
     return 0
 
 
@@ -955,11 +973,15 @@ def cmd_team_add(args: argparse.Namespace) -> int:
     agents, _source = effective_team(repo)
     if any(agent["name"] == args.agent for agent in agents):
         raise UserError(f"agent already exists: {args.agent}")
-    row: dict[str, Any] = {"name": args.agent, "role": args.role, "mode": args.mode}
+    row: dict[str, Any] = {"name": args.agent, "role": args.role, "mode": args.mode, "engine": args.engine}
     if args.model:
         row["model"] = args.model
+    if args.thinking_effort:
+        row["thinking_effort"] = args.thinking_effort
     if args.heartbeat is not None:
         row["options"] = {"heartbeat": parse_heartbeat_value(args.heartbeat)}
+    if row["mode"] == "interactive" and row["engine"] != "pi":
+        raise UserError("--mode interactive requires --engine pi")
     if (row.get("options") or {}).get("heartbeat") and row["mode"] != "interactive":
         raise UserError("--heartbeat requires --mode interactive")
     agents.append(row)
@@ -994,11 +1016,18 @@ def cmd_team_set(args: argparse.Namespace) -> int:
             agent["role"] = args.role
         if args.mode:
             agent["mode"] = args.mode
+        if args.engine:
+            agent["engine"] = args.engine
         if args.model is not None:
             if args.model:
                 agent["model"] = args.model
             else:
                 agent.pop("model", None)
+        if args.thinking_effort is not None:
+            if args.thinking_effort:
+                agent["thinking_effort"] = args.thinking_effort
+            else:
+                agent.pop("thinking_effort", None)
         if args.heartbeat is not None:
             agent.setdefault("options", {})["heartbeat"] = parse_heartbeat_value(args.heartbeat)
         if args.no_heartbeat:
@@ -1010,10 +1039,20 @@ def cmd_team_set(args: argparse.Namespace) -> int:
                 agent.pop("options", None)
         if (agent.get("options") or {}).get("heartbeat") and agent["mode"] != "interactive":
             raise UserError('heartbeat requires mode = "interactive"')
+        if agent["mode"] == "interactive" and agent.get("engine", "pi") != "pi":
+            raise UserError('interactive agents require engine = "pi"')
     if not found:
         raise UserError(f"agent not found in team: {args.agent}")
-    if not any([args.role, args.mode, args.model is not None, args.heartbeat is not None, args.no_heartbeat]):
-        raise UserError("team set requires --role, --mode, --model, --heartbeat, or --no-heartbeat")
+    if not any([
+        args.role,
+        args.mode,
+        args.engine,
+        args.model is not None,
+        args.thinking_effort is not None,
+        args.heartbeat is not None,
+        args.no_heartbeat,
+    ]):
+        raise UserError("team set requires --role, --mode, --engine, --model, --thinking-effort, --heartbeat, or --no-heartbeat")
     write_local_team(repo, agents)
     print(repo.config_dir / "team.toml")
     return 0
@@ -1397,7 +1436,10 @@ def cmd_restart(_args: argparse.Namespace) -> int:
 
 def team_agent_command(_multiagent_dir: Path, agent: dict[str, Any]) -> list[str]:
     mode = agent["mode"]
+    engine = str(agent.get("engine", "pi") or "pi")
     if mode == "interactive":
+        if engine != "pi":
+            raise UserError(f"interactive agent '{agent['name']}' requires engine = \"pi\"")
         command = [
             sys.executable,
             "-m",
@@ -1416,8 +1458,12 @@ def team_agent_command(_multiagent_dir: Path, agent: dict[str, Any]) -> list[str
     else:
         raise UserError(f"invalid mode '{mode}' for agent '{agent['name']}'")
     command.append("--headless")
+    if mode == "worker":
+        command.extend(["--engine", engine])
     if agent.get("model"):
         command.extend(["--model", str(agent["model"])])
+    if agent.get("thinking_effort"):
+        command.extend(["--thinking-effort", str(agent["thinking_effort"])])
     command.extend([agent["role"], agent["name"]])
     return command
 
@@ -1840,7 +1886,9 @@ def add_team_parser(subparsers: argparse._SubParsersAction) -> None:
     add.add_argument("agent")
     add.add_argument("--role", required=True)
     add.add_argument("--mode", choices=sorted(VALID_MODES), default="worker")
+    add.add_argument("--engine", choices=sorted(VALID_ENGINES), default="pi")
     add.add_argument("--model")
+    add.add_argument("--thinking-effort", "--effort", dest="thinking_effort")
     add.add_argument("--heartbeat", type=int)
     add.set_defaults(func=cmd_team_add)
     remove = team_sub.add_parser("remove", help="remove a configured agent")
@@ -1850,7 +1898,9 @@ def add_team_parser(subparsers: argparse._SubParsersAction) -> None:
     set_cmd.add_argument("agent")
     set_cmd.add_argument("--role")
     set_cmd.add_argument("--mode", choices=sorted(VALID_MODES))
+    set_cmd.add_argument("--engine", choices=sorted(VALID_ENGINES))
     set_cmd.add_argument("--model")
+    set_cmd.add_argument("--thinking-effort", "--effort", dest="thinking_effort")
     set_cmd.add_argument("--heartbeat", type=int)
     set_cmd.add_argument("--no-heartbeat", action="store_true")
     set_cmd.set_defaults(func=cmd_team_set)

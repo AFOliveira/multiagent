@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -21,6 +22,15 @@ from typing import Any, Iterable
 
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 PACKAGE = "multiagent"
+ENGINE_CLI = {
+    "pi": "pi",
+    "codex": "codex",
+    "claude": "claude",
+    "codex-work": "codex-work",
+    "claude-work": "claude-work",
+    "cursor": "agent",
+}
+VALID_ENGINES = set(ENGINE_CLI)
 
 
 def timestamp() -> str:
@@ -45,6 +55,13 @@ def validate_name(label: str, value: str) -> None:
 
 def write_file(path: Path, text: str) -> None:
     path.write_text(text + "\n", encoding="utf-8")
+
+
+def read_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def read_package_text(*parts: str) -> str:
@@ -209,9 +226,12 @@ class Transcript:
 
 
 class Renderer:
-    def __init__(self, transcript: Transcript) -> None:
+    def __init__(self, transcript: Transcript, engine: str = "pi", agent_dir: Path | None = None) -> None:
         self.t = transcript
+        self.engine = engine
+        self.agent_dir = agent_dir
         self.error_message: str | None = None
+        self.saw_assistant_text = False
 
     def render_line(self, raw: str) -> None:
         raw = raw.rstrip("\n")
@@ -228,13 +248,214 @@ class Renderer:
         if not isinstance(event, dict):
             return
 
-        self.render_pi(event)
+        self.record_session(event)
+        if self.engine in ("claude", "claude-work"):
+            self.render_claude(event)
+        elif self.engine in ("codex", "codex-work"):
+            self.render_codex(event)
+        elif self.engine == "cursor":
+            self.render_cursor(event)
+        else:
+            self.render_pi(event)
+
+    def record_session(self, event: dict[str, Any]) -> None:
+        if self.agent_dir is None:
+            return
+        if self.engine in ("codex", "codex-work") and event.get("type") == "thread.started":
+            session_id = str(event.get("thread_id") or event.get("threadId") or "").strip()
+            if session_id:
+                write_file(engine_session_file(self.engine, self.agent_dir), session_id)
+            return
+        if self.engine in ("claude", "claude-work") and event.get("type") == "system" and event.get("subtype") == "init":
+            session_id = str(event.get("session_id") or event.get("sessionId") or "").strip()
+            if session_id:
+                write_file(engine_session_file(self.engine, self.agent_dir), session_id)
+            return
+        if self.engine == "cursor":
+            session_id = self.first_string_for_keys(
+                event,
+                ("chatId", "chat_id", "conversationId", "conversation_id", "sessionId", "session_id"),
+            )
+            if session_id:
+                write_file(engine_session_file(self.engine, self.agent_dir), session_id)
+
+    def first_string_for_keys(self, value: Any, keys: tuple[str, ...]) -> str:
+        if isinstance(value, dict):
+            for key in keys:
+                item = value.get(key)
+                if isinstance(item, str) and item.strip():
+                    return item.strip()
+            for item in value.values():
+                found = self.first_string_for_keys(item, keys)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = self.first_string_for_keys(item, keys)
+                if found:
+                    return found
+        return ""
 
     def text_block(self, title: str, text: str) -> None:
         if not text:
             return
         self.t.heading(title)
         self.t.write(text)
+        if title == "Assistant":
+            self.saw_assistant_text = True
+
+    def render_claude(self, event: dict[str, Any]) -> None:
+        typ = event.get("type")
+        subtype = event.get("subtype")
+
+        if typ == "stream_event":
+            inner = event.get("event")
+            if isinstance(inner, dict):
+                delta = inner.get("delta")
+                if isinstance(delta, dict):
+                    delta_type = delta.get("type")
+                    if delta_type == "text_delta":
+                        self.text_block("Assistant", str(delta.get("text", "")))
+                        return
+                    if delta_type in ("thinking_delta", "reasoning_delta"):
+                        self.text_block("Thinking", str(delta.get("thinking") or delta.get("text") or ""))
+                        return
+                if inner.get("type"):
+                    return
+
+        if typ == "system":
+            if subtype == "init":
+                model = event.get("model")
+                session_id = event.get("session_id")
+                detail = "\n".join(
+                    str(item)
+                    for item in (
+                        f"model: {model}" if model else "",
+                        f"session: {session_id}" if session_id else "",
+                    )
+                    if item
+                )
+                self.t.event("claude session initialized", detail)
+                return
+            if subtype == "api_retry":
+                self.t.event(
+                    "claude api retry",
+                    f"attempt: {event.get('attempt')}/{event.get('max_retries')}\nerror: {event.get('error')}",
+                )
+                return
+            if subtype:
+                return
+
+        if typ == "assistant":
+            if not self.saw_assistant_text:
+                text = self.extract_claude_message_text(event.get("message"))
+                if text:
+                    self.text_block("Assistant", text)
+                    return
+
+        if typ == "result":
+            if event.get("is_error"):
+                self.error_message = str(event.get("result") or event.get("error") or "Claude runtime error")
+            result = event.get("result")
+            if result and not self.saw_assistant_text:
+                self.text_block("Assistant", str(result))
+            self.t.event("claude result", self.scalar_metadata(event, skip={"result"}))
+            return
+
+        self.render_generic(event)
+
+    def extract_claude_message_text(self, message: Any) -> str:
+        if not isinstance(message, dict):
+            return ""
+        parts: list[str] = []
+        content = message.get("content")
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(str(item.get("text", "")))
+        return "".join(parts)
+
+    def render_codex(self, event: dict[str, Any]) -> None:
+        typ = event.get("type")
+        if typ == "thread.started":
+            self.t.event("codex thread started", f"thread: {event.get('thread_id')}")
+            return
+        if typ == "turn.started":
+            self.t.event("codex turn started")
+            return
+        if typ == "turn.completed":
+            self.t.event("codex turn completed", self.usage_summary(event.get("usage")))
+            return
+        if typ == "turn.failed":
+            self.error_message = self.scalar_metadata(event, skip={"type"}) or "Codex turn failed"
+            self.t.event("codex turn failed", self.error_message)
+            return
+        if typ == "error":
+            self.error_message = self.scalar_metadata(event, skip={"type"}) or "Codex runtime error"
+            self.t.event("codex error", self.error_message)
+            return
+
+        if typ in ("item.started", "item.updated", "item.completed"):
+            item = event.get("item")
+            if isinstance(item, dict):
+                self.render_codex_item(typ, item)
+                return
+
+        self.render_generic(event)
+
+    def render_codex_item(self, event_type: str, item: dict[str, Any]) -> None:
+        item_type = str(item.get("type", "item"))
+        status = item.get("status")
+        prefix = event_type.replace("item.", "")
+
+        if item_type == "agent_message":
+            text = item.get("text")
+            if text:
+                self.text_block("Assistant", str(text).rstrip() + "\n")
+                return
+
+        if item_type == "reasoning":
+            text = item.get("text") or item.get("summary") or item.get("content")
+            if text:
+                self.text_block("Reasoning", self.plain_text(text).rstrip() + "\n")
+                return
+
+        if item_type == "command_execution":
+            command = self.command_text(item.get("command"))
+            detail_parts = []
+            if command:
+                detail_parts.append(command)
+            if status:
+                detail_parts.append(f"status: {status}")
+            for key in ("exit_code", "duration_ms"):
+                if key in item:
+                    detail_parts.append(f"{key}: {item[key]}")
+            output = item.get("output") or item.get("stdout") or item.get("stderr")
+            if output:
+                detail_parts.append(self.limit_text(self.plain_text(output)))
+            self.t.event(f"command {prefix}", "\n".join(detail_parts))
+            return
+
+        if item_type in ("file_change", "patch", "plan_update", "web_search", "mcp_tool_call"):
+            self.t.event(f"{item_type} {prefix}", self.scalar_metadata(item, skip={"id", "type"}))
+            return
+
+        self.t.event(f"{item_type} {prefix}", self.scalar_metadata(item, skip={"id", "type"}))
+
+    def render_cursor(self, event: dict[str, Any]) -> None:
+        typ = str(event.get("type") or "")
+        text = self.result_text(event.get("text") or event.get("delta") or event.get("message"))
+        if text and typ in ("text", "text_delta", "assistant", "assistant_message", "message"):
+            self.text_block("Assistant", text)
+            return
+        if typ in ("error", "turn.failed", "failed"):
+            self.error_message = self.scalar_metadata(event, skip={"type"}) or "Cursor runtime error"
+            self.t.event("cursor error", self.error_message)
+            return
+        if typ in ("reasoning", "thinking", "thinking_delta"):
+            self.text_block("Thinking", text)
+            return
+        self.render_generic(event)
 
     def render_pi(self, event: dict[str, Any]) -> None:
         typ = event.get("type")
@@ -385,6 +606,15 @@ class Renderer:
             return self.scalar_metadata(value)
         return str(value)
 
+    def usage_summary(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return ""
+        parts = []
+        for key in ("input_tokens", "output_tokens", "total_tokens", "input", "output", "totalTokens"):
+            if key in value and not isinstance(value[key], (dict, list, tuple)):
+                parts.append(f"{key}: {value[key]}")
+        return "\n".join(parts)
+
     def limit_text(self, text: str, limit: int = 4000) -> str:
         if len(text) <= limit:
             return text
@@ -396,7 +626,9 @@ def parse_args() -> argparse.Namespace:
         description="Run one named MULTIAGENT agent and render JSON output to transcript.log."
     )
     parser.add_argument("--headless", action="store_true", help="Do not mirror rendered transcript output to stdout")
+    parser.add_argument("--engine", choices=sorted(VALID_ENGINES), default="pi")
     parser.add_argument("-m", "--model")
+    parser.add_argument("--thinking-effort", "--effort", dest="thinking_effort")
     parser.add_argument("role")
     parser.add_argument("agent_name")
     return parser.parse_args()
@@ -465,20 +697,133 @@ def initial_user_prompt() -> str:
     return "Process your assigned MULTIAGENT job now."
 
 
-def build_command(model: str | None, agent_dir: Path, context_prompt: str) -> list[str]:
-    cmd = ["pi", "-p", "--mode", "json"]
-    if model:
-        cmd.extend(["--model", model])
-    cmd.extend(
-        [
-            "--append-system-prompt",
-            context_prompt,
-            "--session-dir",
-            str(agent_dir / "pi-session"),
-            initial_user_prompt(),
+def codex_config_value(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def engine_executable(engine: str) -> str:
+    return ENGINE_CLI[engine]
+
+
+def engine_session_file(engine: str, agent_dir: Path) -> Path:
+    if engine == "cursor":
+        return agent_dir / "cursor-chat-id"
+    return agent_dir / f"{engine}-session-id"
+
+
+def prepare_engine_session(engine: str, agent_dir: Path) -> None:
+    if engine in ("claude", "claude-work"):
+        path = engine_session_file(engine, agent_dir)
+        if not read_file(path):
+            write_file(path, str(uuid.uuid4()))
+    if engine == "cursor":
+        path = engine_session_file(engine, agent_dir)
+        if read_file(path):
+            return
+        proc = subprocess.run(
+            [engine_executable(engine), "create-chat"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip() or f"exit status {proc.returncode}"
+            die(f"failed to create Cursor chat for resumable worker session: {detail}", proc.returncode)
+        chat_id = proc.stdout.strip().splitlines()[-1].strip() if proc.stdout.strip() else ""
+        if not chat_id:
+            die("agent create-chat returned no chat id")
+        write_file(path, chat_id)
+
+
+def build_command(
+    engine: str,
+    model: str | None,
+    thinking_effort: str | None,
+    agent_dir: Path,
+    context_prompt: str,
+) -> list[str]:
+    if engine == "pi":
+        cmd = ["pi", "-p", "--mode", "json"]
+        if model:
+            cmd.extend(["--model", model])
+        if thinking_effort:
+            cmd.extend(["--thinking", thinking_effort])
+        cmd.extend(
+            [
+                "--append-system-prompt",
+                context_prompt,
+                "--session-dir",
+                str(agent_dir / "pi-session"),
+                initial_user_prompt(),
+            ]
+        )
+        return cmd
+    if engine in ("codex", "codex-work"):
+        session_id = read_file(engine_session_file(engine, agent_dir))
+        cmd = [engine_executable(engine), "exec"]
+        if session_id:
+            cmd.append("resume")
+        cmd.extend(
+            [
+                "--json",
+                "--output-last-message",
+                str(agent_dir / "last-message.md"),
+                "--dangerously-bypass-approvals-and-sandbox",
+            ]
+        )
+        if model:
+            cmd.extend(["--model", model])
+        if thinking_effort:
+            cmd.extend(["-c", f"model_reasoning_effort={codex_config_value(thinking_effort)}"])
+        if session_id:
+            cmd.append(session_id)
+        cmd.append(context_prompt + "\n\n" + initial_user_prompt())
+        return cmd
+    if engine in ("claude", "claude-work"):
+        cmd = [engine_executable(engine), "-p", "--dangerously-skip-permissions"]
+        session_id = read_file(engine_session_file(engine, agent_dir))
+        if session_id:
+            if (agent_dir / f"{engine}-session-started").is_file():
+                cmd.extend(["--resume", session_id])
+            else:
+                cmd.extend(["--session-id", session_id])
+        if model:
+            cmd.extend(["--model", model])
+        if thinking_effort:
+            cmd.extend(["--effort", thinking_effort])
+        cmd.extend(
+            [
+                "--append-system-prompt",
+                context_prompt,
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                initial_user_prompt(),
+            ]
+        )
+        return cmd
+    if engine == "cursor":
+        if thinking_effort:
+            die("cursor engine does not support --thinking-effort; choose a thinking-capable Cursor model with --model")
+        session_id = read_file(engine_session_file(engine, agent_dir))
+        cmd = [
+            engine_executable(engine),
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--stream-partial-output",
+            "--force",
+            "--trust",
         ]
-    )
-    return cmd
+        if session_id:
+            cmd.extend(["--resume", session_id])
+        if model:
+            cmd.extend(["--model", model])
+        cmd.append(context_prompt + "\n\n" + initial_user_prompt())
+        return cmd
+    raise AssertionError(engine)
 
 
 def main() -> int:
@@ -492,8 +837,9 @@ def main() -> int:
     state_root = state_dir(root)
     repo_root = read_repo_root(root)
 
-    if shutil.which("pi") is None:
-        die("required command not found: pi")
+    executable = engine_executable(args.engine)
+    if shutil.which(executable) is None:
+        die(f"required command not found for engine '{args.engine}': {executable}")
 
     read_role_text(root, args.role)
 
@@ -503,8 +849,11 @@ def main() -> int:
     agent_dir = Path(agent_dir_out)
 
     write_file(agent_dir / "mode", "worker")
+    write_file(agent_dir / "engine", args.engine)
     if args.model:
         write_file(agent_dir / "model", args.model)
+    if args.thinking_effort:
+        write_file(agent_dir / "thinking_effort", args.thinking_effort)
     write_file(agent_dir / "last_started_at", timestamp())
     write_runtime_pids(agent_dir)
 
@@ -568,14 +917,16 @@ def main() -> int:
                     f"agent: {args.agent_name}",
                     f"role: {args.role}",
                     f"job: {job_id}",
-                    "runtime: pi",
+                    f"engine: {args.engine}",
                     f"model: {args.model}" if args.model else "",
+                    f"thinking_effort: {args.thinking_effort}" if args.thinking_effort else "",
                 )
                 if part
             ),
         )
 
-        cmd = build_command(args.model, agent_dir, prompt)
+        prepare_engine_session(args.engine, agent_dir)
+        cmd = build_command(args.engine, args.model, args.thinking_effort, agent_dir, prompt)
         proc = subprocess.Popen(
             cmd,
             cwd=repo_root or root,
@@ -604,19 +955,21 @@ def main() -> int:
         stderr_thread = threading.Thread(target=copy_stderr, daemon=True)
         stderr_thread.start()
 
-        renderer = Renderer(transcript)
+        renderer = Renderer(transcript, args.engine, agent_dir)
         assert proc.stdout is not None
         for line in proc.stdout:
             renderer.render_line(line)
 
         rc = proc.wait()
         stderr_thread.join(timeout=1)
+        if args.engine in ("claude", "claude-work") and rc == 0:
+            write_file(agent_dir / f"{args.engine}-session-started", "1")
         if renderer.error_message:
-            runtime_failure = f"Pi runtime error: {renderer.error_message}"
+            runtime_failure = f"{args.engine} runtime error: {renderer.error_message}"
             if rc == 0:
                 rc = 1
         elif rc != 0:
-            runtime_failure = f"Pi process exited with status {rc}"
+            runtime_failure = f"{args.engine} process exited with status {rc}"
 
         detail = f"exit: {rc}"
         if runtime_failure:

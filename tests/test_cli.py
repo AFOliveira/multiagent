@@ -314,6 +314,39 @@ class CliTest(unittest.TestCase):
                 )
             )
 
+    def test_team_config_supports_engine_and_thinking_effort(self) -> None:
+        from multiagent import cli
+
+        agents = cli.parse_team_text(
+            "\n".join(
+                [
+                    '[[agent]]',
+                    'name = "implementer-1"',
+                    'role = "implementer"',
+                    'mode = "worker"',
+                    'engine = "codex"',
+                    'model = "gpt-5.1-codex-max"',
+                    'thinking_effort = "high"',
+                ]
+            )
+        )
+
+        self.assertEqual(agents[0]["engine"], "codex")
+        self.assertEqual(agents[0]["thinking_effort"], "high")
+
+        with self.assertRaises(cli.UserError):
+            cli.parse_team_text(
+                "\n".join(
+                    [
+                        '[[agent]]',
+                        'name = "operator"',
+                        'role = "planner"',
+                        'mode = "interactive"',
+                        'engine = "claude"',
+                    ]
+                )
+            )
+
     def test_parse_heartbeat_value(self) -> None:
         from multiagent import cli
 
@@ -539,14 +572,17 @@ class CliTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 parser.parse_args(["local", "rules", "reset", "--yes"])
 
-    def test_runtime_agent_tools_do_not_expose_engine_selection(self) -> None:
+    def test_runtime_agent_tools_expose_engine_and_effort_selection(self) -> None:
         agent_tool = self.load_agent_tool()
         interactive_tool = self.load_interactive_agent_tool()
 
-        with mock.patch.object(sys, "argv", ["agent", "planner", "planner-1"]):
-            self.assertFalse(hasattr(agent_tool.parse_args(), "engine"))
-        with mock.patch.object(sys, "argv", ["agent-pi-interactive", "planner", "operator"]):
-            self.assertFalse(hasattr(interactive_tool.parse_args(), "engine"))
+        with mock.patch.object(sys, "argv", ["agent", "--engine", "claude", "--thinking-effort", "high", "planner", "planner-1"]):
+            parsed = agent_tool.parse_args()
+            self.assertEqual(parsed.engine, "claude")
+            self.assertEqual(parsed.thinking_effort, "high")
+        with mock.patch.object(sys, "argv", ["agent-pi-interactive", "--thinking-effort", "xhigh", "planner", "operator"]):
+            parsed = interactive_tool.parse_args()
+            self.assertEqual(parsed.thinking_effort, "xhigh")
 
 
     def test_agent_renderer_surfaces_pi_message_errors(self) -> None:
@@ -616,29 +652,33 @@ class CliTest(unittest.TestCase):
         interactive_tool = self.load_interactive_agent_tool()
         session_dir = self.repo / "pi-session"
 
-        command = interactive_tool.build_pi_rpc_command(None, "prompt", session_dir)
+        command = interactive_tool.build_pi_rpc_command(None, None, "prompt", session_dir)
         self.assertNotIn("--continue", command)
 
         session_dir.mkdir()
         (session_dir / "session.jsonl").write_text("{}\n", encoding="utf-8")
-        command = interactive_tool.build_pi_rpc_command("test-model", "prompt", session_dir)
+        command = interactive_tool.build_pi_rpc_command("test-model", "high", "prompt", session_dir)
 
         self.assertIn("--continue", command)
         self.assertIn("--append-system-prompt", command)
         self.assertIn("--session-dir", command)
         self.assertIn("test-model", command)
+        self.assertIn("--thinking", command)
+        self.assertIn("high", command)
 
     def test_worker_pi_command_injects_context_as_system_append(self) -> None:
         agent_tool = self.load_agent_tool()
         agent_dir = self.repo / "agent"
 
-        command = agent_tool.build_command("test-model", agent_dir, "MULTIAGENT context")
+        command = agent_tool.build_command("pi", "test-model", "high", agent_dir, "MULTIAGENT context")
 
         self.assertIn("--append-system-prompt", command)
         self.assertEqual(command[command.index("--append-system-prompt") + 1], "MULTIAGENT context")
         self.assertEqual(command[-1], "Process your assigned MULTIAGENT job now.")
         self.assertIn("--session-dir", command)
         self.assertIn("test-model", command)
+        self.assertIn("--thinking", command)
+        self.assertIn("high", command)
 
     def test_interactive_restart_prompt_points_to_existing_transcript(self) -> None:
         interactive_tool = self.load_interactive_agent_tool()
@@ -831,11 +871,27 @@ class CliTest(unittest.TestCase):
                 "name": "reviewer-1",
                 "role": "reviewer",
                 "mode": "worker",
+                "engine": "codex",
                 "model": "test-model",
+                "thinking_effort": "high",
             },
         )
         self.assertEqual(command[:4], [sys.executable, "-m", "multiagent", "agent"])
-        self.assertEqual(command[4:], ["worker", "--headless", "--model", "test-model", "reviewer", "reviewer-1"])
+        self.assertEqual(
+            command[4:],
+            [
+                "worker",
+                "--headless",
+                "--engine",
+                "codex",
+                "--model",
+                "test-model",
+                "--thinking-effort",
+                "high",
+                "reviewer",
+                "reviewer-1",
+            ],
+        )
 
         interactive = cli.team_agent_command(
             multiagent_dir,
@@ -847,6 +903,80 @@ class CliTest(unittest.TestCase):
         )
         self.assertEqual(interactive[:4], [sys.executable, "-m", "multiagent", "agent"])
         self.assertEqual(interactive[4:], ["interactive", "--headless", "planner", "planner-1"])
+
+    def test_worker_engine_commands_map_model_and_effort(self) -> None:
+        agent_tool = self.load_agent_tool()
+        agent_dir = self.repo / "agent"
+        agent_dir.mkdir()
+
+        codex = agent_tool.build_command("codex", "gpt-5.1-codex-max", "high", agent_dir, "ctx")
+        self.assertEqual(codex[:3], ["codex", "exec", "--json"])
+        self.assertIn("--model", codex)
+        self.assertIn("gpt-5.1-codex-max", codex)
+        self.assertIn("-c", codex)
+        self.assertIn('model_reasoning_effort="high"', codex)
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", codex)
+
+        claude = agent_tool.build_command("claude", "sonnet", "max", agent_dir, "ctx")
+        self.assertEqual(claude[:2], ["claude", "-p"])
+        self.assertIn("--model", claude)
+        self.assertIn("sonnet", claude)
+        self.assertIn("--effort", claude)
+        self.assertIn("max", claude)
+
+        cursor = agent_tool.build_command("cursor", "sonnet-4-thinking", None, agent_dir, "ctx")
+        self.assertEqual(cursor[0], "agent")
+        self.assertIn("--model", cursor)
+        self.assertIn("sonnet-4-thinking", cursor)
+
+    def test_worker_engine_commands_resume_existing_sessions(self) -> None:
+        agent_tool = self.load_agent_tool()
+        agent_dir = self.repo / "agent"
+        agent_dir.mkdir()
+
+        (agent_dir / "codex-session-id").write_text("codex-thread-1\n", encoding="utf-8")
+        codex = agent_tool.build_command("codex", None, None, agent_dir, "ctx")
+        self.assertEqual(codex[:3], ["codex", "exec", "resume"])
+        self.assertIn("codex-thread-1", codex)
+
+        (agent_dir / "claude-session-id").write_text("11111111-1111-4111-8111-111111111111\n", encoding="utf-8")
+        claude_first = agent_tool.build_command("claude", None, None, agent_dir, "ctx")
+        self.assertIn("--session-id", claude_first)
+        self.assertNotIn("--resume", claude_first)
+
+        (agent_dir / "claude-session-started").write_text("1\n", encoding="utf-8")
+        claude_resume = agent_tool.build_command("claude", None, None, agent_dir, "ctx")
+        self.assertIn("--resume", claude_resume)
+        self.assertIn("11111111-1111-4111-8111-111111111111", claude_resume)
+
+        (agent_dir / "cursor-chat-id").write_text("cursor-chat-1\n", encoding="utf-8")
+        cursor = agent_tool.build_command("cursor", None, None, agent_dir, "ctx")
+        self.assertIn("--resume", cursor)
+        self.assertIn("cursor-chat-1", cursor)
+
+    def test_worker_renderer_persists_engine_session_ids(self) -> None:
+        agent_tool = self.load_agent_tool()
+        agent_dir = self.repo / "agent"
+        agent_dir.mkdir()
+        transcript_path = self.repo / "transcript.log"
+        transcript = agent_tool.Transcript([transcript_path])
+        try:
+            codex_renderer = agent_tool.Renderer(transcript, "codex", agent_dir)
+            codex_renderer.render_line(json.dumps({"type": "thread.started", "thread_id": "codex-thread-2"}))
+
+            claude_renderer = agent_tool.Renderer(transcript, "claude", agent_dir)
+            claude_renderer.render_line(
+                json.dumps({"type": "system", "subtype": "init", "session_id": "22222222-2222-4222-8222-222222222222"})
+            )
+
+            cursor_renderer = agent_tool.Renderer(transcript, "cursor", agent_dir)
+            cursor_renderer.render_line(json.dumps({"type": "system", "chatId": "cursor-chat-2"}))
+        finally:
+            transcript.close()
+
+        self.assertEqual((agent_dir / "codex-session-id").read_text(encoding="utf-8").strip(), "codex-thread-2")
+        self.assertEqual((agent_dir / "claude-session-id").read_text(encoding="utf-8").strip(), "22222222-2222-4222-8222-222222222222")
+        self.assertEqual((agent_dir / "cursor-chat-id").read_text(encoding="utf-8").strip(), "cursor-chat-2")
 
     def test_agent_runtime_main_forwards_options(self) -> None:
         from multiagent import cli

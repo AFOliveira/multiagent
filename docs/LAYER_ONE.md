@@ -64,7 +64,8 @@ options = { heartbeat = 15 }
 
 `mode = "worker"` agents claim queued jobs and exit after completing one job.
 `mode = "interactive"` agents keep a persistent Pi RPC session and accept live
-input. Pi is always the runtime; there is no `engine` field in `team.toml`.
+input. Worker agents can select `engine = "pi"`, `codex`, `claude`,
+`codex-work`, `claude-work`, or `cursor`. Interactive agents must use Pi.
 
 ## Interactive Input
 

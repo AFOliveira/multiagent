@@ -5,18 +5,28 @@
 name = "planner-1"
 role = "planner"
 mode = "worker"
+engine = "codex"
+model = "gpt-5.5"
+thinking_effort = "xhigh"
 
 [[agent]]
 name = "implementer-1"
 role = "implementer"
 mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
 
 [[agent]]
 name = "reviewer-1"
 role = "reviewer"
 mode = "worker"
+engine = "codex"
+model = "gpt-5.5"
+thinking_effort = "xhigh"
 
 [[agent]]
 name = "committer-1"
 role = "committer"
 mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
