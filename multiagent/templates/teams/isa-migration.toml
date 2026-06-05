@@ -1,0 +1,116 @@
+# EuropeRISC-V ISA migration MULTIAGENT team
+# Source: clean-release flow on esperanto-soc6, 2026-06-05.
+
+[[agent]]
+name = "planner-1"
+role = "planner"
+mode = "worker"
+engine = "codex"
+model = "gpt-5.5"
+thinking_effort = "xhigh"
+
+[[agent]]
+name = "udb-auditor-1"
+role = "udb-auditor"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "encoding-analyst-1"
+role = "encoding-analyst"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "compliance-1"
+role = "compliance"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "toolchain-1"
+role = "toolchain"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "rtl-1"
+role = "rtl"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "dv-1"
+role = "dv"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "simulator-1"
+role = "simulator"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "zephyr-1"
+role = "zephyr"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "integrator-1"
+role = "integrator"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "sysemu-run-1"
+role = "sysemu-run"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "verilator-run-1"
+role = "verilator-run"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "reviewer-1"
+role = "reviewer"
+mode = "worker"
+engine = "codex"
+model = "gpt-5.5"
+thinking_effort = "xhigh"
+
+[[agent]]
+name = "documenter-1"
+role = "documenter"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "implementer-1"
+role = "implementer"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"
+
+[[agent]]
+name = "committer-1"
+role = "committer"
+mode = "worker"
+engine = "cursor"
+model = "composer-2.5"

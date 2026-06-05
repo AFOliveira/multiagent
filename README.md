@@ -237,6 +237,12 @@ socket recorded in:
 
 `multiagent local prompt <agent> ...` and the dashboard use that socket.
 
+Additional team templates can be copied from `multiagent/templates/teams/`.
+For the EuropeRISC-V ISA migration demo, use
+`multiagent/templates/teams/isa-migration.toml`; it records the clean-release
+team with Codex `gpt-5.5` xhigh planner/reviewer agents and Cursor
+`composer-2.5` implementation workers.
+
 ## Docker Details
 
 `multiagent docker` starts a repository's MULTIAGENT system inside Docker while

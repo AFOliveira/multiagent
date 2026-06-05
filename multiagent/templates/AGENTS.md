@@ -14,6 +14,18 @@ instructions define role-specific responsibilities and are loaded into context
 by the launcher. If role instructions omit a generic rule from this file, the
 rule still applies.
 
+## Workload Placement
+
+All substantive workloads must run on `esperanto-soc6` under `/root/afonso`.
+This includes MULTIAGENT supervisors, worker agents, interactive agents, build
+jobs, tests, DV runs, code generation, implementation, review, and commit work.
+
+The local machine is the control plane only. Use it to inspect state, coordinate
+the plan, copy repositories/config/context to `root@esperanto-soc6:/root/afonso`,
+and start or observe the remote MULTIAGENT system. Do not run project workloads
+locally unless the human operator explicitly authorizes a local fallback for a
+specific command.
+
 ## Tool Boundary
 
 The `multiagent agent ...` command group is the interface to local task and job

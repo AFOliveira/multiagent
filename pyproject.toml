@@ -41,6 +41,7 @@ multiagent = [
   "templates/AGENTS.md",
   "templates/roles/*.md",
   "templates/team.toml",
+  "templates/teams/*.toml",
   "runtime/bin/*",
   "runtime/tools/*",
   "runtime/tools/multiagent-public/*",

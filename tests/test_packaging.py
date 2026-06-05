@@ -54,6 +54,7 @@ class PackagingTest(unittest.TestCase):
             self.assertNotIn("multiagent-dashboard = multiagent.dashboard:main", entry_points)
             self.assertNotIn("multiagent-run = multiagent.runner:main", entry_points)
             self.assertIn("multiagent/templates/AGENTS.md", names)
+            self.assertIn("multiagent/templates/teams/isa-migration.toml", names)
             self.assertNotIn("multiagent/runtime/AGENTS.md", names)
             self.assertIn("multiagent/runtime/bin/job-kill", names)
             self.assertIn("multiagent/runtime/bin/job-reset", names)
