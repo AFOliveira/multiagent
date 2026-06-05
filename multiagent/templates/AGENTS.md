@@ -16,15 +16,16 @@ rule still applies.
 
 ## Workload Placement
 
-All substantive workloads must run on `esperanto-soc6` under `/root/afonso`.
-This includes MULTIAGENT supervisors, worker agents, interactive agents, build
-jobs, tests, DV runs, code generation, implementation, review, and commit work.
+If the repository or task declares an operator-designated remote workload host,
+all substantive workloads must run there. This includes MULTIAGENT supervisors,
+worker agents, interactive agents, build jobs, tests, DV runs, code generation,
+implementation, review, and commit work.
 
-The local machine is the control plane only. Use it to inspect state, coordinate
-the plan, copy repositories/config/context to `root@esperanto-soc6:/root/afonso`,
-and start or observe the remote MULTIAGENT system. Do not run project workloads
-locally unless the human operator explicitly authorizes a local fallback for a
-specific command.
+The local machine is the control plane only when a remote workload host is
+declared. Use it to inspect state, coordinate the plan, copy
+repositories/config/context to the configured remote root, and start or observe
+the remote MULTIAGENT system. Do not run project workloads locally unless the
+human operator explicitly authorizes a local fallback for a specific command.
 
 ## Tool Boundary
 

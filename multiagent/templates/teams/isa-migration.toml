@@ -1,5 +1,5 @@
 # EuropeRISC-V ISA migration MULTIAGENT team
-# Source: clean-release flow on esperanto-soc6, 2026-06-05.
+# Source: sanitized public snapshot of the clean-release flow, 2026-06-05.
 
 [[agent]]
 name = "planner-1"
